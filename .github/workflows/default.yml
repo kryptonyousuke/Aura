@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Instalar Vulkan SDK
-        run: sudo apt-get update && sudo apt-get install -y libvulkan-dev vulkan-tools
+      - name: Install Vulkan SDK
+        run: sudo apt-get update && sudo apt-get install -y libvulkan-dev vulkan-tools libavutil-dev libavcodec-dev libavformat-dev libswresample-dev libswscale-dev pkg-config
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
