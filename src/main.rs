@@ -1,8 +1,8 @@
 use ffmpeg_next as ffmpeg;
-mod vulkan;
 mod video;
+mod vulkan;
+use anyhow::Result;
 use winit::event_loop::EventLoop;
-use anyhow::{Result};
 
 fn main() -> Result<()> {
     ffmpeg::init()?;

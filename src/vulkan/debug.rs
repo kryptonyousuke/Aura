@@ -9,7 +9,10 @@ pub unsafe extern "system" fn vulkan_debug_callback(
     unsafe {
         let callback_data = *p_callback_data;
         let message = CStr::from_ptr(callback_data.p_message).to_string_lossy();
-        println!("[Vulkan Validation Layers] {:?} - {:?}", message_severity, message);
+        println!(
+            "[Vulkan Validation Layers] {:?} - {:?}",
+            message_severity, message
+        );
     }
     vk::FALSE
 }
