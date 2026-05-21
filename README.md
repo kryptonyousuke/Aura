@@ -12,6 +12,12 @@
 > [!WARNING]
 > Experimental software: bugs, crashes, and undefined behavior are expected.
 
+| Codec | Status | Hardware Acceleration |
+| :--- | :---: | :---: |
+| H.264 | 🚧 | Under development |
+| H.265 | 🚧 | Coming soon |
+| AV1 | 🚧 | Coming soon |
+
 ## Stonks!!
 
 ![](https://starchart.cc/kryptonyousuke/Aura.svg?background=%2302000000&axis=%23333333&line=%237c44ff)
