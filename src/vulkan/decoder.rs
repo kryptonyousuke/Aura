@@ -417,20 +417,20 @@ impl Decoder for Aura {
 
     /*
      * Well... There are two ways to show decoded frames in Vulkan:
-     *      - no-copy (DPB -> ImageLayout conversion [VIDEO_DECODE_DPB_KHR -> SHADER_READ_ONLY_OPTIMAL] -> 
+     *      - no-copy (DPB -> ImageLayout conversion [VIDEO_DECODE_DPB_KHR -> SHADER_READ_ONLY_OPTIMAL] ->
      *           SamplerYcbcr -> Fragment Shader -> ImageLayout Reversion -> back to DPB);
      *      - copy (DPB -> 2 independent image copies [Image A - Y, Image B - U & V] considering the YUV format -> Fragment Shader).
-     *      
-     * The first one is obviously what we want to do because the performance is better and it will decrease the needed VRAM size, 
-     * but it doesn't allow us to use vkCmdBlitImage. Its direct consequence is that on some GPUs that don't support 
-     * VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT, we can't maintain the original frame quality if the user 
-     * resizes the window (color artifacting). 
-     * 
+     *
+     * The first one is obviously what we want to do because the performance is better and it will decrease the needed VRAM size,
+     * but it doesn't allow us to use vkCmdBlitImage. Its direct consequence is that on some GPUs that don't support
+     * VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT, we can't maintain the original frame quality if the user
+     * resizes the window (color artifacting).
+     *
      * For now, we won't use the copy method on purpose. In the future, this player will verify the window extent and use
      * the copy or no-copy approach depending on whether it matches.
-     * 
+     *
      */
-    
+
     fn copy_image(
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,

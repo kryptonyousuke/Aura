@@ -108,9 +108,27 @@ impl Aura {
             ash_window::enumerate_required_extensions(window.display_handle().unwrap().as_raw())
                 .expect("Failed to retrieve window extensions.")
                 .to_vec();
-        instance_extensions.push(vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_NAME.as_ptr());
-        instance_extensions.push(vk::KHR_EXTERNAL_MEMORY_CAPABILITIES_NAME.as_ptr());
         instance_extensions.push(ash::ext::debug_utils::NAME.as_ptr());
+        let available_extensions = unsafe {
+            entry
+                .enumerate_instance_extension_properties(None)
+                .unwrap()
+                .into_iter()
+        };
+        log::info!("------------ Available Instance Extensions -----------");
+        for extension in available_extensions {
+            log::info!("{:?}", extension.extension_name_as_c_str().unwrap());
+        }
+        log::info!("------------ Required Instance Extensions -----------");
+        for extension_ptr in &instance_extensions {
+            unsafe {
+                let c_str = std::ffi::CStr::from_ptr(*extension_ptr);
+                let name = c_str.to_string_lossy();
+                log::info!("Extensão: {}", name);
+            }
+        }
+        log::info!("------------------------------------------------------");
+
         log::info!("Creating Vulkan instance.");
         let app_name = unsafe { CStr::from_bytes_with_nul_unchecked(b"Aura\0") };
         let app_info = vk::ApplicationInfo::default()
@@ -235,6 +253,32 @@ impl Aura {
             .luma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8)
             .chroma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8);
 
+        log::info!(
+            "\nThis is being shown just for your knowledge, this code won't work with a lot of cards for now."
+        );
+
+        Self::log_formats(
+            physical_device,
+            &video_profile,
+            &video_instance_ext,
+            vk::ImageUsageFlags::VIDEO_DECODE_DPB_KHR | vk::ImageUsageFlags::VIDEO_DECODE_DST_KHR,
+            "VIDEO_DECODE_DPB_KHR | VIDEO_DECODE_DST_KHR",
+        );
+        Self::log_formats(
+            physical_device,
+            &video_profile,
+            &video_instance_ext,
+            vk::ImageUsageFlags::VIDEO_DECODE_DPB_KHR,
+            "VIDEO_DECODE_DPB_KHR",
+        );
+        Self::log_formats(
+            physical_device,
+            &video_profile,
+            &video_instance_ext,
+            vk::ImageUsageFlags::VIDEO_DECODE_DST_KHR,
+            "VIDEO_DECODE_DST_KHR",
+        );
+
         let DecodingSession {
             session,
             _session_memories,
@@ -245,8 +289,6 @@ impl Aura {
             &instance,
             physical_device,
             &device,
-            &video_instance_ext,
-            &mut video_profile,
             decode_queue_family_index,
         );
 
@@ -546,8 +588,6 @@ impl Aura {
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
         device: &ash::Device,
-        video_instance_ext: &ash::khr::video_queue::Instance,
-        video_profile: &mut vk::VideoProfileInfoKHR,
         queue_family_index: u32,
     ) -> DecodingSession {
         let video_loader = video_queue::Device::load(instance, device);
@@ -565,41 +605,6 @@ impl Aura {
             &video_loader,
             session,
         );
-
-        let mut profile_list =
-            vk::VideoProfileListInfoKHR::default().profiles(std::slice::from_ref(&video_profile));
-
-        let format_info = vk::PhysicalDeviceVideoFormatInfoKHR::default()
-            .image_usage(vk::ImageUsageFlags::VIDEO_DECODE_DPB_KHR)
-            .push(&mut profile_list);
-
-        let supported_formats_len = unsafe {
-            video_instance_ext
-                .get_physical_device_video_format_properties_len(physical_device, &format_info)
-                .unwrap()
-        };
-
-        let mut supported_formats: Vec<vk::VideoFormatPropertiesKHR> =
-            vec![vk::VideoFormatPropertiesKHR::default(); supported_formats_len as usize];
-
-        unsafe {
-            video_instance_ext
-                .get_physical_device_video_format_properties(
-                    physical_device,
-                    &format_info,
-                    &mut supported_formats,
-                )
-                .unwrap();
-        }
-
-        log::info!(
-            "\nThis is being showed just for your knowledge, this code won't work with a lot of cards for now."
-        );
-        log::info!("------ GPU's supported formats -------");
-        for (i, prop) in supported_formats.iter().enumerate() {
-            log::info!("Config #{}: Format: {:?}", i, prop.format);
-        }
-        log::info!("--------------------------------------");
 
         DecodingSession {
             session: session,
@@ -817,6 +822,59 @@ impl Aura {
             }
         }
         0
+    }
+
+    fn log_formats(
+        physical_device: vk::PhysicalDevice,
+        video_profile: &vk::VideoProfileInfoKHR,
+        video_instance_ext: &ash::khr::video_queue::Instance,
+        image_usage_flags: vk::ImageUsageFlags,
+        identifier: &str,
+    ) {
+        let mut profile_list =
+            vk::VideoProfileListInfoKHR::default().profiles(std::slice::from_ref(video_profile));
+        let format_info = vk::PhysicalDeviceVideoFormatInfoKHR::default()
+            .image_usage(image_usage_flags)
+            .push(&mut profile_list);
+
+        let supported_formats_len_result = unsafe {
+            video_instance_ext
+                .get_physical_device_video_format_properties_len(physical_device, &format_info)
+        };
+        log::info!(
+            "-------- GPU's supported formats for {} ---------",
+            identifier
+        );
+
+        if supported_formats_len_result.is_ok() {
+            let mut supported_formats: Vec<vk::VideoFormatPropertiesKHR> = vec![
+                    vk::VideoFormatPropertiesKHR::default();
+                    supported_formats_len_result.unwrap() as usize
+                ];
+
+            let result = unsafe {
+                video_instance_ext.get_physical_device_video_format_properties(
+                    physical_device,
+                    &format_info,
+                    &mut supported_formats,
+                )
+            };
+            if result.is_ok() {
+                for (i, prop) in supported_formats.iter().enumerate() {
+                    log::info!("- Config #{}:", i);
+                    log::info!("Image Type: {:?}", prop.image_type);
+                    log::info!("Format: {:?}", prop.format);
+                    log::info!("Tiling: {:?}", prop.image_tiling);
+                    log::info!("Component Mapping: {:?}", prop.component_mapping);
+                    log::info!("Flags: {:?}", prop.image_usage_flags);
+                }
+            } else {
+                log::info!("Config #0: Format: None");
+            }
+        } else {
+            log::info!("Config #0: Format: None");
+        }
+        log::info!("------------------------------------------");
     }
 }
 

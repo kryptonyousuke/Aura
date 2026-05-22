@@ -80,9 +80,7 @@ impl ApplicationHandler for App {
                 }
 
                 self.video_ctx = None;
-
                 self.window = None;
-
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
@@ -90,18 +88,23 @@ impl ApplicationHandler for App {
                     if let Some((stream, packet)) = v_ctx.ictx.packets().next() {
                         if stream.index() == v_ctx.video_stream_index {
                             if let Some(data) = packet.data() {
-                                let annexb = if v_ctx.is_first_frame {
+                                let conversion = if v_ctx.is_first_frame {
                                     avcc_to_annexb(data, &v_ctx.extradata)
                                 } else {
                                     avcc_to_annexb(data, &[])
                                 };
 
-                                aura.upload_bitstream_packet(&annexb);
-
-                                aura.decode_frame(&annexb, v_ctx.is_first_frame);
-
-                                if v_ctx.is_first_frame {
-                                    v_ctx.is_first_frame = false;
+                                match conversion {
+                                    Ok(annexb) => {
+                                        aura.upload_bitstream_packet(&annexb);
+                                        aura.decode_frame(&annexb, v_ctx.is_first_frame);
+                                        if v_ctx.is_first_frame {
+                                            v_ctx.is_first_frame = false;
+                                        }
+                                    }
+                                    Err(err) => {
+                                        log::error!("Skip frame due to a parser error: {}", err);
+                                    }
                                 }
                             }
                         }
@@ -111,6 +114,11 @@ impl ApplicationHandler for App {
                         }
                     } else {
                         log::info!("Reached the end of the file.");
+                        if let Some(vulkan_ctx) = self.aura.take() {
+                            std::mem::drop(vulkan_ctx);
+                            log::info!("Vunkan Context dropped safely.");
+                            event_loop.exit();
+                        }
                     }
                 }
             }
