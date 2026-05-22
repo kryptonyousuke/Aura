@@ -22,3 +22,20 @@
 
 ![](https://starchart.cc/kryptonyousuke/Aura.svg?background=%2302000000&axis=%23333333&line=%237c44ff)
 
+
+
+<h1 align="center">Consider sponsoring the development of Aura!!</h1>
+
+Developing Vulkan applications often relies heavily on hardware-specific code, but my current IGPU doesn't support AV1 decoding/encoding. By sponsoring our project, you're helping us purchase hardware to ensure it will work on all types of setups.
+
+<div align="center" style="padding: 100px;">
+    <a href="https://github.com/sponsors/kryptonyousuke">
+        <img src="https://img.shields.io/github/sponsors/kryptonyousuke?color=EA4AAA&style=for-the-badge&logo=github-sponsors" alt="Aura Sponsors" />
+    </a>
+</div>
+<br/>
+<div align="center">
+    <a href="https://github.com/sponsors/kryptonyousuke">
+        <img src="./assets/sponsor_aura.svg" alt="Sponsor Aura" width="220" />
+    </a>
+</div>
