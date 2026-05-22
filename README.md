@@ -28,7 +28,7 @@
 
 Developing Vulkan applications often relies heavily on hardware-specific code, but my current IGPU doesn't support AV1 decoding/encoding. By sponsoring our project, you're helping us purchase hardware to ensure it will work on all types of setups.
 
-<div align="center" style="padding: 100px;">
+<div align="center">
     <a href="https://github.com/sponsors/kryptonyousuke">
         <img src="https://img.shields.io/github/sponsors/kryptonyousuke?color=EA4AAA&style=for-the-badge&logo=github-sponsors" alt="Aura Sponsors" />
     </a>

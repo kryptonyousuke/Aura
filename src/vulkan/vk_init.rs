@@ -54,6 +54,7 @@ pub struct Aura {
     pub _debug_utils_loader: ash::ext::debug_utils::Instance,
     pub _debug_messenger: DebugUtilsMessengerEXT,
     pub(super) _video_queue_family_index: u32,
+    pub(super) _graphics_queue_family_index: u32,
     pub(super) _session_memories: Vec<vk::DeviceMemory>,
     pub(super) session: vk::VideoSessionKHR,
     pub(super) bitstream_buffer: vk::Buffer,
@@ -101,7 +102,8 @@ impl Aura {
         } else {
             vec![]
         };
-        let layers_pointers: Vec<*const i8> = layer_names.iter().map(|&name| name).collect();
+        let layers_pointers: Vec<*const std::os::raw::c_char> =
+            layer_names.iter().map(|&name| name).collect();
         let mut instance_extensions =
             ash_window::enumerate_required_extensions(window.display_handle().unwrap().as_raw())
                 .expect("Failed to retrieve window extensions.")
@@ -306,7 +308,8 @@ impl Aura {
             .command_pool(video_command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(FRAMES_IN_FLIGHT as u32);
-        let video_command_buffers = unsafe { device.allocate_command_buffers(&video_alloc_info).unwrap() };
+        let video_command_buffers =
+            unsafe { device.allocate_command_buffers(&video_alloc_info).unwrap() };
 
         let (dpb_pool, dst_pool) = Self::create_dpb_dst_pool(
             &instance,
@@ -340,7 +343,6 @@ impl Aura {
 
         let mut frames_in_flight_fences = Vec::with_capacity(FRAMES_IN_FLIGHT as usize);
 
-        
         for _ in 0..FRAMES_IN_FLIGHT {
             unsafe {
                 frames_in_flight_fences.push(
@@ -358,6 +360,8 @@ impl Aura {
             surface: surface,
             surface_loader: surface_loader,
             _video_queue_family_index: decode_queue_family_index,
+            _graphics_queue_family_index: graphics_queue_family_index,
+
             video_instance_ext: video_instance_ext,
             physical_device: physical_device,
             session: session,
