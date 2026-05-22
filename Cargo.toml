@@ -10,6 +10,7 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+overflow-checks = false
 
 [dependencies]
 winit = "0.30.13"

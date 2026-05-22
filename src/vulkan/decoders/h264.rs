@@ -4,6 +4,7 @@ use ash::vk::TaggedStructure;
 use ash::{Device, vk};
 use rayon::prelude::*;
 use std::mem::MaybeUninit;
+use std::u64;
 pub trait H264Decoder {
     fn decode_frame(&mut self, bitstream_data: &[u8], is_first_frame: bool);
     unsafe fn create_h264_session_parameters(
@@ -20,10 +21,13 @@ impl H264Decoder for Aura {
         log::debug!("current_frame_index: {}", self.current_frame_index);
         log::debug!("dpb_pool_size: {}", self.dpb_pool_size);
         log::debug!("frame_idx: {}", frame_idx);
-
         unsafe {
+            
             let swapchain_sync_idx =
-                (self.current_frame_index % self.swapchain_images.len()) as usize;
+                (self.current_frame_index % self.frames_in_flight as usize) as usize;
+            log::debug!("swapchain_sync_idx: {}", swapchain_sync_idx);
+            let _ = self.device.wait_for_fences(&[self.render_fences[swapchain_sync_idx]], true, u64::MAX).unwrap();
+            let _ = self.device.reset_fences(&[self.render_fences[swapchain_sync_idx]]);
             let (image_index, _is_suboptimal) = self
                 .swapchain_loader
                 .acquire_next_image(
@@ -34,12 +38,11 @@ impl H264Decoder for Aura {
                 )
                 .unwrap();
 
-            let signal_semaphores = [self.render_complete_semaphores[image_index as usize]];
             let begin_info = vk::CommandBufferBeginInfo::default()
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
             self.device
-                .begin_command_buffer(self.video_command_buffer, &begin_info)
+                .begin_command_buffer(self.video_command_buffers[swapchain_sync_idx], &begin_info)
                 .unwrap();
 
             let image_barriers = [
@@ -78,7 +81,7 @@ impl H264Decoder for Aura {
                 vk::DependencyInfo::default().image_memory_barriers(&image_barriers);
 
             self.device
-                .cmd_pipeline_barrier2(self.video_command_buffer, &dependency_info);
+                .cmd_pipeline_barrier2(self.video_command_buffers[swapchain_sync_idx], &dependency_info);
 
             let mut std_pic_info: vk::native::StdVideoDecodeH264PictureInfo =
                 MaybeUninit::zeroed().assume_init();
@@ -181,13 +184,13 @@ impl H264Decoder for Aura {
                 .reference_slots(&coding_reference_slots);
 
             self.video_loader
-                .cmd_begin_video_coding(self.video_command_buffer, &begin_coding_info);
+                .cmd_begin_video_coding(self.video_command_buffers[swapchain_sync_idx], &begin_coding_info);
 
             if is_first_frame {
                 let control_info = vk::VideoCodingControlInfoKHR::default()
                     .flags(vk::VideoCodingControlFlagsKHR::RESET);
                 self.video_loader
-                    .cmd_control_video_coding(self.video_command_buffer, &control_info);
+                    .cmd_control_video_coding(self.video_command_buffers[swapchain_sync_idx], &control_info);
             }
 
             // 6. Decode
@@ -207,23 +210,25 @@ impl H264Decoder for Aura {
                 .reference_slots(&reference_slots)
                 .push(&mut h264_decode_info);
 
-            self.decode_loader
-                .cmd_decode_video(self.video_command_buffer, &decode_info);
+            self.decode_loader.cmd_decode_video(self.video_command_buffers[swapchain_sync_idx], &decode_info);
 
             // 7. End Coding & Submit Execution
             self.video_loader.cmd_end_video_coding(
-                self.video_command_buffer,
+                self.video_command_buffers[swapchain_sync_idx],
                 &vk::VideoEndCodingInfoKHR::default(),
             );
             self.device
-                .end_command_buffer(self.video_command_buffer)
+                .end_command_buffer(self.video_command_buffers[swapchain_sync_idx])
                 .expect("Erro buffer");
-
-            let submit_info = vk::SubmitInfo::default()
-                .command_buffers(std::slice::from_ref(&self.video_command_buffer))
-                .signal_semaphores(&signal_semaphores);
-            self.device
-                .queue_submit(self.video_queue, &[submit_info], vk::Fence::null())
+            let video_command_buffer_submit_info = &[vk::CommandBufferSubmitInfo::default().command_buffer(self.video_command_buffers[swapchain_sync_idx])];
+            let render_semaphores_submit_info = &[vk::SemaphoreSubmitInfo::default().semaphore(self.render_complete_semaphores[image_index as usize]).stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)];
+            let present_semaphores_submit_info = &[vk::SemaphoreSubmitInfo::default().semaphore(self.present_complete_semaphores[swapchain_sync_idx as usize]).stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)];
+            
+            let submit_info = vk::SubmitInfo2::default()
+                .command_buffer_infos(video_command_buffer_submit_info)
+                .wait_semaphore_infos(present_semaphores_submit_info)
+                .signal_semaphore_infos(render_semaphores_submit_info);
+            self.device.queue_submit2(self.video_queue, &[submit_info], self.render_fences[swapchain_sync_idx])
                 .unwrap();
             let swapchains = [self.swapchain];
             let image_indices = [image_index];

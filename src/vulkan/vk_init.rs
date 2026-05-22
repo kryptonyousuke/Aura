@@ -3,7 +3,9 @@ use crate::vulkan::decoder::Decoder;
 use crate::vulkan::decoders::h264::H264Decoder;
 use ash::vk::{DebugUtilsMessengerEXT, TaggedStructure};
 use ash::{
-    Entry, Instance, khr::video_decode_queue::Device as VideoDecodeLoader, khr::video_queue, vk,
+    Entry, Instance,
+    khr::{video_decode_queue::Device as VideoDecodeLoader, video_queue},
+    vk,
 };
 use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
 use std::ffi::CStr;
@@ -70,7 +72,7 @@ pub struct Aura {
     pub graphics_command_pool: vk::CommandPool,
     pub graphics_command_buffer: vk::CommandBuffer,
     pub video_command_pool: vk::CommandPool,
-    pub video_command_buffer: vk::CommandBuffer,
+    pub video_command_buffers: Vec<vk::CommandBuffer>,
     pub swapchain_loader: ash::khr::swapchain::Device,
     pub swapchain: vk::SwapchainKHR,
     pub swapchain_images: Vec<vk::Image>,
@@ -79,16 +81,19 @@ pub struct Aura {
     pub swapchain_extent: vk::Extent2D,
     pub present_complete_semaphores: Vec<vk::Semaphore>,
     pub render_complete_semaphores: Vec<vk::Semaphore>,
-    pub render_fence: vk::Fence,
+    pub render_fences: Vec<vk::Fence>,
     pub extent: vk::Extent2D,
     pub ycbcr_conversion: vk::SamplerYcbcrConversion,
+    pub frames_in_flight: u8,
     supported_decoders: SupportedCodecs,
 }
 
 impl Aura {
-    pub fn new(window: &winit::window::Window) -> Self {
-        let dpb_pool_size = 16;
+    // Constants
 
+    pub fn new(window: &winit::window::Window) -> Self {
+        const FRAMES_IN_FLIGHT: u8 = 3;
+        let dpb_pool_size = 16;
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
         let validation_layer = CStr::from_bytes_with_nul(b"VK_LAYER_KHRONOS_validation\0").unwrap();
         let layer_names: Vec<*const std::os::raw::c_char> = if cfg!(debug_assertions) {
@@ -108,7 +113,7 @@ impl Aura {
         let app_name = unsafe { CStr::from_bytes_with_nul_unchecked(b"Aura\0") };
         let app_info = vk::ApplicationInfo::default()
             .application_name(app_name)
-            .api_version(vk::make_api_version(0, 1, 3, 0));
+            .api_version(vk::make_api_version(0, 1, 4, 0));
 
         let instance_create_info = vk::InstanceCreateInfo::default()
             .application_info(&app_info)
@@ -300,9 +305,9 @@ impl Aura {
         let video_alloc_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(video_command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(1);
-        let video_command_buffer =
-            unsafe { device.allocate_command_buffers(&video_alloc_info).unwrap()[0] };
+            .command_buffer_count(FRAMES_IN_FLIGHT as u32);
+        let video_command_buffers = unsafe { device.allocate_command_buffers(&video_alloc_info).unwrap() };
+
         let (dpb_pool, dst_pool) = Self::create_dpb_dst_pool(
             &instance,
             physical_device,
@@ -312,8 +317,12 @@ impl Aura {
             dpb_pool_size,
         );
         let semaphore_create_info = vk::SemaphoreCreateInfo::default();
+        let frames_in_flight_fences_info =
+            vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
+
         let mut present_complete_semaphores = Vec::new();
         let mut render_complete_semaphores = Vec::new();
+
         for _ in 0..swapchain_images.len() {
             unsafe {
                 present_complete_semaphores.push(
@@ -328,9 +337,20 @@ impl Aura {
                 );
             }
         }
-        let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
-        let render_fence = unsafe { device.create_fence(&fence_info, None).unwrap() };
+        let mut frames_in_flight_fences = Vec::with_capacity(FRAMES_IN_FLIGHT as usize);
+
+        
+        for _ in 0..FRAMES_IN_FLIGHT {
+            unsafe {
+                frames_in_flight_fences.push(
+                    device
+                        .create_fence(&frames_in_flight_fences_info, None)
+                        .unwrap(),
+                );
+            }
+        }
+
         Self {
             _entry: entry,
             _instance: instance,
@@ -352,7 +372,7 @@ impl Aura {
             decode_loader: decode_loader,
             ycbcr_conversion: ycbcr_conversion,
             graphics_command_buffer: graphics_command_buffer,
-            video_command_buffer: video_command_buffer,
+            video_command_buffers: video_command_buffers,
             graphics_queue: graphics_queue,
             video_queue: video_queue,
             session_parameters: session_parameters,
@@ -368,11 +388,12 @@ impl Aura {
             swapchain_extent: swapchain_extent,
             present_complete_semaphores: present_complete_semaphores,
             render_complete_semaphores: render_complete_semaphores,
-            render_fence: render_fence,
+            render_fences: frames_in_flight_fences,
             extent: vk::Extent2D {
                 width: 1920,
                 height: 1080,
             },
+            frames_in_flight: FRAMES_IN_FLIGHT,
             supported_decoders: supported_decoders,
         }
     }
@@ -834,7 +855,10 @@ impl Drop for Aura {
             self.device.free_memory(self.bitstream_memory, None);
             log::debug!("Video decoding resources were successfully freed and destroyed.");
 
-            self.device.destroy_fence(self.render_fence, None);
+            for i in 0..self.frames_in_flight {
+                self.device
+                    .destroy_fence(self.render_fences[i as usize], None);
+            }
             for &semaphore in &self.present_complete_semaphores {
                 self.device.destroy_semaphore(semaphore, None);
             }
