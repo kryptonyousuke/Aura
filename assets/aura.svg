@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="aura-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#a855f7" /> <stop offset="100%" stop-color="#f43f5e" /> </linearGradient>
+    
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="15" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="#07080d" rx="40" />
+
+  <g transform="translate(256, 256)" filter="url(#glow)">
+    <path d="M -90,120 L -10, -110 L 10, -110 L 90, 120" fill="none" stroke="url(#aura-grad)" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <path d="M -70,50 L 0, -60 L 70, 50" fill="none" stroke="#a855f7" stroke-width="10" stroke-linecap="round" stroke-dasharray="25 15" opacity="0.6"/>
+    
+    <circle cx="0" cy="-60" r="15" fill="#f43f5e"/>
+    <circle cx="0" cy="-60" r="30" fill="none" stroke="#f43f5e" stroke-width="2" opacity="0.4"/>
+  </g>
+</svg>
