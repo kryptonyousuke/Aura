@@ -3,9 +3,12 @@ use ash::khr::video_queue;
 use ash::vk::TaggedStructure;
 use ash::{Device, Instance, vk};
 
-#[allow(dead_code)]
 pub trait Decoder {
-    fn create_video_session(instance: &Instance, device: &Device, qfi: u32) -> vk::VideoSessionKHR;
+    fn create_video_session(
+        instance: &Instance,
+        device: &Device,
+        video_queue_index: u32,
+    ) -> vk::VideoSessionKHR;
     fn bind_video_session_memory(
         instance: &Instance,
         pd: vk::PhysicalDevice,
@@ -34,6 +37,8 @@ pub trait Decoder {
         command_buffer: vk::CommandBuffer,
         image: vk::Image,
         current_layer: u32,
+        video_queue_index: u32,
+        graphics_queue_index: u32,
     );
     unsafe fn create_video_descriptor_set_layout(
         device: &Device,
@@ -49,11 +54,31 @@ pub trait Decoder {
         command_buffer: vk::CommandBuffer,
         image: vk::Image,
         current_layer: u32,
+        video_queue_index: u32,
+        graphics_queue_index: u32,
+    );
+    unsafe fn acquire_dpb_on_graphic(
+        device: &ash::Device,
+        cmd_buf_graphics: vk::CommandBuffer,
+        dpb_image: vk::Image,
+        decode_layout: vk::ImageLayout,
+        video_queue_family: u32,
+        graphics_queue_family: u32,
+    );
+    fn copy_image(
+        device: &ash::Device,
+        command_buffer: vk::CommandBuffer,
+        src_image: vk::Image,
+        dst_texture: vk::Image,
     );
 }
 
 impl Decoder for Aura {
-    fn create_video_session(instance: &Instance, device: &Device, qfi: u32) -> vk::VideoSessionKHR {
+    fn create_video_session(
+        instance: &Instance,
+        device: &Device,
+        video_queue_index: u32,
+    ) -> vk::VideoSessionKHR {
         // Will be a general use function.
         let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
             .std_profile_idc(vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_MAIN);
@@ -71,7 +96,7 @@ impl Decoder for Aura {
             header_version.spec_version = vk::make_api_version(0, 1, 0, 0);
         }
         let create_info = vk::VideoSessionCreateInfoKHR::default()
-            .queue_family_index(qfi)
+            .queue_family_index(video_queue_index)
             .video_profile(&video_profile)
             .picture_format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
             .reference_picture_format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
@@ -277,18 +302,22 @@ impl Decoder for Aura {
         command_buffer: vk::CommandBuffer,
         image: vk::Image,
         current_layer: u32,
+        video_queue_index: u32,
+        graphics_queue_index: u32,
     ) {
         unsafe {
             let barrier = [vk::ImageMemoryBarrier2::default()
+                .src_queue_family_index(video_queue_index)
                 .src_stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)
                 .src_access_mask(vk::AccessFlags2::VIDEO_DECODE_WRITE_KHR)
+                .dst_queue_family_index(graphics_queue_index)
                 .dst_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
                 .dst_access_mask(vk::AccessFlags2::SHADER_READ_KHR)
                 .old_layout(vk::ImageLayout::VIDEO_DECODE_DPB_KHR)
                 .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .image(image)
                 .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::PLANE_0 | vk::ImageAspectFlags::PLANE_1,
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
                     level_count: 1,
                     base_array_layer: current_layer,
@@ -325,18 +354,22 @@ impl Decoder for Aura {
         command_buffer: vk::CommandBuffer,
         image: vk::Image,
         current_layer: u32,
+        video_queue_index: u32,
+        graphics_queue_index: u32,
     ) {
         unsafe {
             let barrier = [vk::ImageMemoryBarrier2::default()
+                .src_queue_family_index(graphics_queue_index)
                 .src_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
                 .src_access_mask(vk::AccessFlags2::SHADER_READ_KHR)
+                .dst_queue_family_index(video_queue_index)
                 .dst_stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)
                 .dst_access_mask(vk::AccessFlags2::VIDEO_DECODE_WRITE_KHR)
                 .old_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
                 .new_layout(vk::ImageLayout::VIDEO_DECODE_DPB_KHR)
                 .image(image)
                 .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::PLANE_0 | vk::ImageAspectFlags::PLANE_1,
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
                     level_count: 1,
                     base_array_layer: current_layer,
@@ -345,6 +378,93 @@ impl Decoder for Aura {
 
             let dependency_info = vk::DependencyInfo::default().image_memory_barriers(&barrier);
             device.cmd_pipeline_barrier2(command_buffer, &dependency_info);
+        }
+    }
+    unsafe fn acquire_dpb_on_graphic(
+        device: &ash::Device,
+        cmd_buf_graphics: vk::CommandBuffer,
+        dpb_image: vk::Image,
+        decode_layout: vk::ImageLayout,
+        video_queue_family: u32,
+        graphics_queue_family: u32,
+    ) {
+        let acquire_barrier = vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::NONE)
+            .src_access_mask(vk::AccessFlags2::NONE)
+            .dst_stage_mask(vk::PipelineStageFlags2::TRANSFER)
+            .dst_access_mask(vk::AccessFlags2::TRANSFER_READ)
+            .old_layout(decode_layout)
+            .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+            .src_queue_family_index(video_queue_family)
+            .dst_queue_family_index(graphics_queue_family)
+            .image(dpb_image)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            });
+
+        let dependency_info = vk::DependencyInfo::default()
+            .image_memory_barriers(std::slice::from_ref(&acquire_barrier));
+
+        // Grava a barreira no command buffer de gráficos
+        unsafe {
+            device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency_info);
+        }
+    }
+
+    /*
+     * Well... There are two ways to show decoded frames in Vulkan:
+     *      - no-copy (DPB -> ImageLayout conversion [VIDEO_DECODE_DPB_KHR -> SHADER_READ_ONLY_OPTIMAL] -> 
+     *           SamplerYcbcr -> Fragment Shader -> ImageLayout Reversion -> back to DPB);
+     *      - copy (DPB -> 2 independent image copies [Image A - Y, Image B - U & V] considering the YUV format -> Fragment Shader).
+     *      
+     * The first one is obviously what we want to do because the performance is better and it will decrease the needed VRAM size, 
+     * but it doesn't allow us to use vkCmdBlitImage. Its direct consequence is that on some GPUs that don't support 
+     * VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT, we can't maintain the original frame quality if the user 
+     * resizes the window (color artifacting). 
+     * 
+     * For now, we won't use the copy method on purpose. In the future, this player will verify the window extent and use
+     * the copy or no-copy approach depending on whether it matches.
+     * 
+     */
+    
+    fn copy_image(
+        device: &ash::Device,
+        command_buffer: vk::CommandBuffer,
+        src_image: vk::Image,
+        dst_texture: vk::Image,
+    ) {
+        let copy_region = vk::ImageCopy::default()
+            .src_subresource(vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .dst_subresource(vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .extent(vk::Extent3D {
+                width: 1920,
+                height: 1080,
+                depth: 1,
+            });
+
+        unsafe {
+            device.cmd_copy_image(
+                command_buffer,
+                src_image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                dst_texture,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                std::slice::from_ref(&copy_region),
+            );
         }
     }
 }
