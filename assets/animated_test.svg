@@ -25,23 +25,19 @@
       <stop offset="100%" stop-color="#00f2fe" stop-opacity="0" />
     </radialGradient>
 
-    <!-- Modern Gradients for typography and borders -->
+    <!-- Dynamic Colorful Title Gradient -->
     <linearGradient id="text-grad" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#ffffff" />
-      <stop offset="50%" stop-color="#f8fafc" />
-      <stop offset="100%" stop-color="#e2e8f0" />
+      <stop offset="35%" stop-color="#00f2fe" />
+      <stop offset="70%" stop-color="#9d4edd" />
+      <stop offset="100%" stop-color="#ff4500" />
     </linearGradient>
 
+    <!-- Pipeline accents and general UI highlights gradient -->
     <linearGradient id="accent-grad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#ff4500" />
       <stop offset="50%" stop-color="#7c3aed" />
       <stop offset="100%" stop-color="#00f2fe" />
-    </linearGradient>
-
-    <linearGradient id="card-border" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00f2fe" stop-opacity="0.4"/>
-      <stop offset="50%" stop-color="#7c3aed" stop-opacity="0.1"/>
-      <stop offset="100%" stop-color="#ff4500" stop-opacity="0.4"/>
     </linearGradient>
 
     <!-- Patterns & Filters -->
@@ -75,7 +71,7 @@
   </defs>
 
   <style>
-    /* CSS animations to provide rich interactive feel */
+    /* CSS animations with isolated transformation contexts */
     .animated-pulse {
       animation: pulse-glow 6s ease-in-out infinite;
     }
@@ -101,9 +97,10 @@
     @keyframes dash-move-reverse {
       to { stroke-dashoffset: 1000; }
     }
+    /* Simple floating translation without wiping out coordinate positioning of parent */
     @keyframes float-3d {
-      0% { transform: translate(0, 0); }
-      100% { transform: translate(-3px, -12px); }
+      0% { transform: translateY(0px); }
+      100% { transform: translateY(-12px); }
     }
   </style>
 
@@ -125,7 +122,7 @@
     <!-- Tech Category Indicator -->
     <text x="0" y="85" font-size="11" font-weight="800" fill="#00f2fe" letter-spacing="4" opacity="0.9">PROJECT // CORE_ENGINE</text>
     
-    <!-- Title "AURA" with dropping shadow -->
+    <!-- Title "AURA" with dropping shadow and new vibrant gradient -->
     <text x="0" y="185" font-size="86" font-weight="900" letter-spacing="18" fill="url(#text-grad)" filter="drop-shadow(0px 10px 20px rgba(0,0,0,0.4))">AURA</text>
     
     <!-- Dynamic horizontal accent indicator line -->
@@ -197,43 +194,46 @@
     </g>
   </g>
 
-  <!-- 3. Hardware Video Decoded Frame Buffer (Floating 3D YUV planes) -->
-  <g class="float-yuv" transform="translate(940, 150)">
-    
-    <!-- Isometric Projection container -->
-    <g transform="rotate(-15) skewX(25) scale(0.9)">
+  <!-- 3. Hardware Video Decoded Frame Buffer (Floating 3D YUV planes with nested position isolation) -->
+  <g transform="translate(940, 165)">
+    <!-- Animating group floats independently of base translation coordinates -->
+    <g class="float-yuv">
       
-      <!-- V (Chroma) Plane (Top Layer) -->
-      <g transform="translate(-40, -40)" opacity="0.8">
-        <rect x="0" y="0" width="120" height="90" rx="8" fill="#0a0f1d" fill-opacity="0.85" stroke="#ff4500" stroke-width="1.5" filter="url(#glow-heavy)"/>
-        <rect x="10" y="10" width="100" height="70" rx="4" fill="none" stroke="#ff4500" stroke-opacity="0.15" stroke-width="1"/>
-        <line x1="25" y1="45" x2="95" y2="45" stroke="#ff4500" stroke-opacity="0.3" stroke-width="1" />
-        <line x1="60" y1="15" x2="60" y2="75" stroke="#ff4500" stroke-opacity="0.3" stroke-width="1" />
-        <text x="15" y="24" fill="#ff7a45" font-family="monospace" font-size="11" font-weight="800">PLANE_V</text>
-      </g>
+      <!-- Isometric Projection Container -->
+      <g transform="rotate(-15) skewX(25) scale(0.9)">
+        
+        <!-- V (Chroma) Plane (Top Layer) -->
+        <g transform="translate(-40, -40)" opacity="0.8">
+          <rect x="0" y="0" width="120" height="90" rx="8" fill="#0a0f1d" fill-opacity="0.85" stroke="#ff4500" stroke-width="1.5" filter="url(#glow-heavy)"/>
+          <rect x="10" y="10" width="100" height="70" rx="4" fill="none" stroke="#ff4500" stroke-opacity="0.15" stroke-width="1"/>
+          <line x1="25" y1="45" x2="95" y2="45" stroke="#ff4500" stroke-opacity="0.3" stroke-width="1" />
+          <line x1="60" y1="15" x2="60" y2="75" stroke="#ff4500" stroke-opacity="0.3" stroke-width="1" />
+          <text x="15" y="24" fill="#ff7a45" font-family="monospace" font-size="11" font-weight="800">PLANE_V</text>
+        </g>
 
-      <!-- U (Chroma) Plane (Middle Layer) -->
-      <g transform="translate(-20, -20)" opacity="0.85">
-        <rect x="0" y="0" width="120" height="90" rx="8" fill="#0a0f1d" fill-opacity="0.85" stroke="#7c3aed" stroke-width="1.5" filter="url(#glow-heavy)"/>
-        <rect x="10" y="10" width="100" height="70" rx="4" fill="none" stroke="#7c3aed" stroke-opacity="0.15" stroke-width="1"/>
-        <line x1="25" y1="45" x2="95" y2="45" stroke="#7c3aed" stroke-opacity="0.3" stroke-width="1" />
-        <line x1="60" y1="15" x2="60" y2="75" stroke="#7c3aed" stroke-opacity="0.3" stroke-width="1" />
-        <text x="15" y="24" fill="#a78bfa" font-family="monospace" font-size="11" font-weight="800">PLANE_U</text>
-      </g>
+        <!-- U (Chroma) Plane (Middle Layer) -->
+        <g transform="translate(-20, -20)" opacity="0.85">
+          <rect x="0" y="0" width="120" height="90" rx="8" fill="#0a0f1d" fill-opacity="0.85" stroke="#7c3aed" stroke-width="1.5" filter="url(#glow-heavy)"/>
+          <rect x="10" y="10" width="100" height="70" rx="4" fill="none" stroke="#7c3aed" stroke-opacity="0.15" stroke-width="1"/>
+          <line x1="25" y1="45" x2="95" y2="45" stroke="#7c3aed" stroke-opacity="0.3" stroke-width="1" />
+          <line x1="60" y1="15" x2="60" y2="75" stroke="#7c3aed" stroke-opacity="0.3" stroke-width="1" />
+          <text x="15" y="24" fill="#a78bfa" font-family="monospace" font-size="11" font-weight="800">PLANE_U</text>
+        </g>
 
-      <!-- Y (Luma) Plane (Bottom Layer) -->
-      <g transform="translate(0, 0)" opacity="0.9">
-        <rect x="0" y="0" width="120" height="90" rx="8" fill="#0a0f1d" fill-opacity="0.9" stroke="#00f2fe" stroke-width="2" filter="url(#glow-heavy)"/>
-        <rect x="10" y="10" width="100" height="70" rx="4" fill="none" stroke="#00f2fe" stroke-opacity="0.2" stroke-width="1"/>
-        <polygon points="45,30 85,45 45,60" fill="none" stroke="url(#accent-grad)" stroke-width="2" stroke-linejoin="round" />
-        <polygon points="50,38 75,45 50,52" fill="url(#accent-grad)" opacity="0.3" />
-        <text x="15" y="24" fill="#00f2fe" font-family="monospace" font-size="11" font-weight="800">PLANE_Y</text>
-      </g>
+        <!-- Y (Luma) Plane (Bottom Layer) -->
+        <g transform="translate(0, 0)" opacity="0.9">
+          <rect x="0" y="0" width="120" height="90" rx="8" fill="#0a0f1d" fill-opacity="0.9" stroke="#00f2fe" stroke-width="2" filter="url(#glow-heavy)"/>
+          <rect x="10" y="10" width="100" height="70" rx="4" fill="none" stroke="#00f2fe" stroke-opacity="0.2" stroke-width="1"/>
+          <polygon points="45,30 85,45 45,60" fill="none" stroke="url(#accent-grad)" stroke-width="2" stroke-linejoin="round" />
+          <polygon points="50,38 75,45 50,52" fill="url(#accent-grad)" opacity="0.3" />
+          <text x="15" y="24" fill="#00f2fe" font-family="monospace" font-size="11" font-weight="800">PLANE_Y</text>
+        </g>
 
+      </g>
+      
+      <!-- YUV Pipeline Label (Flat alignment on bottom of 3D stack) -->
+      <text x="20" y="115" fill="#e2e8f0" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="800" letter-spacing="3" text-anchor="middle" opacity="0.8">YUV OUTPUT FRAME</text>
     </g>
-    
-    <!-- YUV Pipeline Label -->
-    <text x="60" y="115" fill="#e2e8f0" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="800" letter-spacing="3" text-anchor="middle" opacity="0.8">YUV OUTPUT FRAME</text>
   </g>
 
   <!-- Framing Grid Corners -->
