@@ -260,7 +260,7 @@ impl Decoder for Aura {
             let ycbcr_info = vk::SamplerYcbcrConversionCreateInfo::default()
                 .format(format)
                 .ycbcr_model(vk::SamplerYcbcrModelConversion::YCBCR_709)
-                .ycbcr_range(vk::SamplerYcbcrRange::ITU_FULL)
+                .ycbcr_range(vk::SamplerYcbcrRange::ITU_NARROW)
                 .components(vk::ComponentMapping {
                     r: vk::ComponentSwizzle::IDENTITY,
                     g: vk::ComponentSwizzle::IDENTITY,

@@ -21,6 +21,7 @@ impl H264Decoder for Aura {
         log::debug!("current_frame_index: {}", self.current_frame_index);
         log::debug!("dpb_pool_size: {}", self.dpb_pool_size);
         log::debug!("frame_idx: {}", frame_idx);
+
         unsafe {
             let swapchain_sync_idx =
                 (self.current_frame_index % self.frames_in_flight as usize) as usize;

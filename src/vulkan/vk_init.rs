@@ -7,6 +7,7 @@ use ash::{
     khr::{video_decode_queue::Device as VideoDecodeLoader, video_queue},
     vk,
 };
+use ffmpeg_next::Format;
 use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
 use std::ffi::CStr;
 
@@ -223,27 +224,10 @@ impl Aura {
                 .create_device(physical_device, &device_create_info, None)
                 .expect("Failed to create a logical device.")
         };
-        let ycbcr_create_info = vk::SamplerYcbcrConversionCreateInfo::default()
-            .format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
-            .ycbcr_model(vk::SamplerYcbcrModelConversion::YCBCR_709)
-            .ycbcr_range(vk::SamplerYcbcrRange::ITU_FULL)
-            .components(vk::ComponentMapping {
-                r: vk::ComponentSwizzle::R,
-                g: vk::ComponentSwizzle::G,
-                b: vk::ComponentSwizzle::B,
-                a: vk::ComponentSwizzle::A,
-            })
-            .x_chroma_offset(vk::ChromaLocation::COSITED_EVEN)
-            .y_chroma_offset(vk::ChromaLocation::COSITED_EVEN)
-            .chroma_filter(vk::Filter::LINEAR);
 
-        let ycbcr_conversion = unsafe {
-            device
-                .create_sampler_ycbcr_conversion(&ycbcr_create_info, None)
-                .expect("Falha ao criar Ycbcr Conversion")
-        };
-        let _ycbcr_conversion_info =
-            vk::SamplerYcbcrConversionInfo::default().conversion(ycbcr_conversion);
+        // Ycbcr Sampler
+        let ycbcr_conversion =
+            unsafe { Self::create_ycbcr_conversion(&device, vk::Format::G8_B8R8_2PLANE_420_UNORM) };
         let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
             .std_profile_idc(vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_MAIN);
         let mut video_profile = vk::VideoProfileInfoKHR::default()

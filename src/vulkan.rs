@@ -5,3 +5,4 @@ pub mod decoder;
 pub mod decoders;
 pub mod vk_init;
 pub mod wsi;
+pub mod pipeline;
