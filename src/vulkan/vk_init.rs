@@ -25,6 +25,7 @@ pub struct DecodingSession {
     pub(super) decode_loader: VideoDecodeLoader,
     pub(super) session_parameters: vk::VideoSessionParametersKHR,
 }
+pub const FRAMES_IN_FLIGHT: u8 = 3;
 
 struct SupportedCodecs {
     h264: bool,
@@ -79,7 +80,7 @@ pub struct Aura {
     pub swapchain_extent: vk::Extent2D,
     pub present_complete_semaphores: Vec<vk::Semaphore>,
     pub render_complete_semaphores: Vec<vk::Semaphore>,
-    pub render_fences: Vec<vk::Fence>,
+    pub render_fences: [vk::Fence; FRAMES_IN_FLIGHT as usize],
     pub extent: vk::Extent2D,
     pub ycbcr_conversion: vk::SamplerYcbcrConversion,
     pub frames_in_flight: u8,
@@ -90,7 +91,6 @@ impl Aura {
     // Constants
 
     pub fn new(window: &winit::window::Window) -> Self {
-        const FRAMES_IN_FLIGHT: u8 = 3;
         let dpb_pool_size = 16;
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
         let validation_layer = c"VK_LAYER_KHRONOS_validation";
@@ -363,15 +363,12 @@ impl Aura {
             }
         }
 
-        let mut frames_in_flight_fences = Vec::with_capacity(FRAMES_IN_FLIGHT as usize);
-
-        for _ in 0..FRAMES_IN_FLIGHT {
+        let mut frames_in_flight_fences = [vk::Fence::null(); FRAMES_IN_FLIGHT as usize];
+        for i in 0..FRAMES_IN_FLIGHT {
             unsafe {
-                frames_in_flight_fences.push(
-                    device
+                frames_in_flight_fences[i as usize] = device
                         .create_fence(&frames_in_flight_fences_info, None)
-                        .unwrap(),
-                );
+                        .unwrap();
             }
         }
 
