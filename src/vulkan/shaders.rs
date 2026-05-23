@@ -24,11 +24,11 @@ impl Aura {
             vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::VERTEX)
                 .module(vert_module)
-                .name(&entry_point),
+                .name(entry_point),
             vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
                 .module(frag_module)
-                .name(&entry_point),
+                .name(entry_point),
         ]
     }
 }
