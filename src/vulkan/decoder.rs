@@ -40,15 +40,6 @@ pub trait Decoder {
         video_queue_index: u32,
         graphics_queue_index: u32,
     );
-    unsafe fn create_video_descriptor_set_layout(
-        device: &Device,
-        video_sampler: vk::Sampler,
-    ) -> vk::DescriptorSetLayout;
-    unsafe fn update_video_descriptor_set(
-        device: &Device,
-        descriptor_set: vk::DescriptorSet,
-        current_dpb_image_view: vk::ImageView,
-    );
     unsafe fn transition_graphic_to_dpb(
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,
@@ -230,28 +221,7 @@ impl Decoder for Aura {
             self.device.unmap_memory(self.bitstream_memory);
         }
     }
-    unsafe fn create_video_descriptor_set_layout(
-        device: &Device,
-        video_sampler: vk::Sampler,
-    ) -> vk::DescriptorSetLayout {
-        unsafe {
-            let immutable_samplers = [video_sampler];
 
-            let layout_binding = vk::DescriptorSetLayoutBinding::default()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-                .immutable_samplers(&immutable_samplers);
-
-            let layout_info = vk::DescriptorSetLayoutCreateInfo::default()
-                .bindings(std::slice::from_ref(&layout_binding));
-
-            device
-                .create_descriptor_set_layout(&layout_info, None)
-                .expect("Failed to create Descriptor Set Layout to the video.")
-        }
-    }
     unsafe fn create_ycbcr_conversion(
         device: &ash::Device,
         format: vk::Format,
@@ -326,26 +296,6 @@ impl Decoder for Aura {
 
             let dependency_info = vk::DependencyInfo::default().image_memory_barriers(&barrier);
             device.cmd_pipeline_barrier2(command_buffer, &dependency_info);
-        }
-    }
-    unsafe fn update_video_descriptor_set(
-        device: &Device,
-        descriptor_set: vk::DescriptorSet,
-        current_dpb_image_view: vk::ImageView,
-    ) {
-        unsafe {
-            let image_info = vk::DescriptorImageInfo::default()
-                .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image_view(current_dpb_image_view)
-                .sampler(vk::Sampler::null());
-
-            let write_set = vk::WriteDescriptorSet::default()
-                .dst_set(descriptor_set)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(std::slice::from_ref(&image_info));
-
-            device.update_descriptor_sets(&[write_set], &[]);
         }
     }
 

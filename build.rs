@@ -1,7 +1,7 @@
 // build.rs
+use shaderc::{Compiler, ShaderKind};
 use std::fs;
 use std::path::Path;
-use shaderc::{Compiler, ShaderKind};
 
 fn main() {
     println!("cargo:rerun-if-changed=shaders/");
@@ -11,7 +11,7 @@ fn main() {
         for entry in fs::read_dir(shader_dir).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
-            
+
             if let Some(extension) = path.extension() {
                 let kind = match extension.to_str().unwrap() {
                     "vert" => ShaderKind::Vertex,

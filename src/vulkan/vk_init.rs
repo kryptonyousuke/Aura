@@ -7,7 +7,6 @@ use ash::{
     khr::{video_decode_queue::Device as VideoDecodeLoader, video_queue},
     vk,
 };
-use ffmpeg_next::Format;
 use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
 use std::ffi::CStr;
 
