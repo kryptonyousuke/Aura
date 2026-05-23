@@ -3,6 +3,7 @@
 pub mod debug;
 pub mod decoder;
 pub mod decoders;
+pub mod shaders;
 pub mod pipeline;
 pub mod vk_init;
 pub mod wsi;
