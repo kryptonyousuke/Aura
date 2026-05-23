@@ -13,12 +13,9 @@ use std::ffi::CStr;
 pub struct DecodeExtensions;
 
 impl DecodeExtensions {
-    pub const H264: &'static CStr =
-        unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_KHR_video_decode_h264\0") };
-    pub const H265: &'static CStr =
-        unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_KHR_video_decode_h265\0") };
-    pub const AV1: &'static CStr =
-        unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_KHR_video_decode_av1\0") };
+    pub const H264: &'static CStr = c"VK_KHR_video_decode_h264";
+    pub const H265: &'static CStr = c"VK_KHR_video_decode_h265";
+    pub const AV1: &'static CStr = c"VK_KHR_video_decode_av1";
 }
 
 pub struct DecodingSession {
@@ -96,7 +93,7 @@ impl Aura {
         const FRAMES_IN_FLIGHT: u8 = 3;
         let dpb_pool_size = 16;
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
-        let validation_layer = CStr::from_bytes_with_nul(b"VK_LAYER_KHRONOS_validation\0").unwrap();
+        let validation_layer = c"VK_LAYER_KHRONOS_validation";
         let layer_names: Vec<*const std::os::raw::c_char> = if cfg!(debug_assertions) {
             vec![validation_layer.as_ptr()]
         } else {
@@ -130,7 +127,7 @@ impl Aura {
         log::info!("------------------------------------------------------");
 
         log::info!("Creating Vulkan instance.");
-        let app_name = unsafe { CStr::from_bytes_with_nul_unchecked(b"Aura\0") };
+        let app_name = c"Aura";
         let app_info = vk::ApplicationInfo::default()
             .application_name(app_name)
             .api_version(vk::make_api_version(0, 1, 4, 0));

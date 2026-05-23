@@ -80,12 +80,11 @@ impl Decoder for Aura {
             .chroma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8)
             .push(&mut h264_profile);
         let mut header_version = vk::ExtensionProperties::default();
-        unsafe {
-            let name = b"VK_STD_vulkan_video_codec_h264_decode\0";
-            header_version.extension_name[..name.len()]
-                .copy_from_slice(std::mem::transmute::<&[u8], &[i8]>(name));
-            header_version.spec_version = vk::make_api_version(0, 1, 0, 0);
+        let name = c"VK_STD_vulkan_video_codec_h264_decode";
+        for (dest, &src) in header_version.extension_name.iter_mut().zip(name.to_bytes_with_nul()) {
+            *dest = src as i8;
         }
+        header_version.spec_version = vk::make_api_version(0, 1, 0, 0);
         let create_info = vk::VideoSessionCreateInfoKHR::default()
             .queue_family_index(video_queue_index)
             .video_profile(&video_profile)
