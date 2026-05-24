@@ -1,6 +1,9 @@
 use super::debug;
 use crate::vulkan::decoder::Decoder;
 use crate::vulkan::decoders::h264::H264Decoder;
+use crate::vulkan::pipeline::Pipeline;
+use crate::vulkan::shaders::Shaders;
+use crate::vulkan::sampler::Sampler;
 use ash::vk::{DebugUtilsMessengerEXT, TaggedStructure};
 use ash::{
     Entry, Instance,
@@ -81,6 +84,10 @@ pub struct Aura {
     pub present_complete_semaphores: Vec<vk::Semaphore>,
     pub render_complete_semaphores: Vec<vk::Semaphore>,
     pub render_fences: [vk::Fence; FRAMES_IN_FLIGHT as usize],
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    video_sampler: vk::Sampler,
+    pipeline_layout: vk::PipelineLayout,
+    pipeline: vk::Pipeline,
     pub extent: vk::Extent2D,
     pub ycbcr_conversion: vk::SamplerYcbcrConversion,
     pub frames_in_flight: u8,
@@ -194,6 +201,7 @@ impl Aura {
             vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
         let mut video_maintenance =
             vk::PhysicalDeviceVideoMaintenance1FeaturesKHR::default().video_maintenance1(true);
+        let mut dynamic_rendering = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
         let mut sampler_ycbcr_conversion =
             vk::PhysicalDeviceSamplerYcbcrConversionFeaturesKHR::default()
                 .sampler_ycbcr_conversion(true);
@@ -213,7 +221,8 @@ impl Aura {
             .enabled_extension_names(&device_extensions)
             .push(&mut sync2_features)
             .push(&mut video_maintenance)
-            .push(&mut sampler_ycbcr_conversion);
+            .push(&mut sampler_ycbcr_conversion)
+            .push(&mut dynamic_rendering);
 
         let device = unsafe {
             instance
@@ -371,7 +380,19 @@ impl Aura {
                         .unwrap();
             }
         }
+        let vert_module = crate::create_shader!(device, "full_screen.vert.spv");
+        let frag_module = crate::create_shader!(device, "show_texture.frag.spv");
+        let shader_stages = Self::create_shader_stages(&device, vert_module, frag_module);
 
+        let video_sampler = Self::create_sampler(&device, ycbcr_conversion);
+        let descriptor_set_layout = Self::create_video_descriptor_set_layout(&device, &video_sampler);
+        let descriptor_set_layouts = &[descriptor_set_layout];
+        let pipeline_layout = Self::create_pipeline_layout(&device, descriptor_set_layouts);
+        let pipeline = Self::create_pipeline(&device, pipeline_layout, &shader_stages);
+        unsafe {
+            device.destroy_shader_module(vert_module, None);
+            device.destroy_shader_module(frag_module, None);
+        };
         Self {
             _entry: entry,
             _instance: instance,
@@ -380,7 +401,6 @@ impl Aura {
             surface_loader: surface_loader,
             _video_queue_family_index: decode_queue_family_index,
             _graphics_queue_family_index: graphics_queue_family_index,
-
             video_instance_ext: video_instance_ext,
             physical_device: physical_device,
             session: session,
@@ -412,6 +432,10 @@ impl Aura {
             present_complete_semaphores: present_complete_semaphores,
             render_complete_semaphores: render_complete_semaphores,
             render_fences: frames_in_flight_fences,
+            video_sampler: video_sampler,
+            descriptor_set_layout: descriptor_set_layout,
+            pipeline_layout: pipeline_layout,
+            pipeline: pipeline,
             extent: vk::Extent2D {
                 width: 1920,
                 height: 1080,
@@ -906,12 +930,16 @@ impl Drop for Aura {
             }
             log::debug!("Sync resources successfully destroyed.");
 
+            self.device.destroy_pipeline(self.pipeline, None);
+            self.device.destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            
             self.device
                 .destroy_command_pool(self.graphics_command_pool, None);
             self.device
                 .destroy_command_pool(self.video_command_pool, None);
             log::debug!("Successfully destroyed all command pools.");
-
+            
             for (_, _, view) in &self.dpb_pool {
                 self.device.destroy_image_view(*view, None);
             }

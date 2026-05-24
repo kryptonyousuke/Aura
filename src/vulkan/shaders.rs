@@ -1,26 +1,28 @@
 use crate::vulkan::vk_init::Aura;
 use std::ffi::{CStr};
 use ash::vk;
-impl Aura {
-    fn create_shader_stages(device: &ash::Device) -> [vk::PipelineShaderStageCreateInfo<'_>; 2]{
-        let frag_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/show_texture.frag.spv"));
-        let vert_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/full_screen.vert.spv"));
-        let vert_u32 = ash::util::read_spv(&mut std::io::Cursor::new(&vert_bytes[..]))
-            .expect("Failed to read vertex SPIR-V");
-        let frag_u32 = ash::util::read_spv(&mut std::io::Cursor::new(&frag_bytes[..]))
-            .expect("Failed to read fragment SPIR-V");
+#[macro_export]
+macro_rules! create_shader { ($device:expr, $shader_name:literal) => {{
+        let shader_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/", $shader_name));
+        let shader_u32 = ash::util::read_spv(&mut std::io::Cursor::new(&shader_bytes[..]))
+            .expect("Failed to read shader SPIR-V");
+        unsafe {
+            $device.create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&shader_u32), None)
+                .expect("Failed to create shader module")
+        }
+    }}
+}
 
-        let vert_module = unsafe {
-            device.create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&vert_u32), None)
-                .expect("Failed to create vertex shader module")
-        };
+pub trait Shaders {
+    fn create_shader_stages(_device: &ash::Device, vert_module: vk::ShaderModule, frag_module: vk::ShaderModule) -> [vk::PipelineShaderStageCreateInfo<'_>; 2];
+}
 
-        let frag_module = unsafe {
-            device.create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&frag_u32), None)
-                .expect("Failed to create fragment shader module")
-        };
+
+impl Shaders for Aura {
+
+    fn create_shader_stages(_device: &ash::Device, vert_module: vk::ShaderModule, frag_module: vk::ShaderModule) -> [vk::PipelineShaderStageCreateInfo<'_>; 2]{
         let entry_point: &'static CStr = c"main";
-        [
+        let shader_stages = [
             vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::VERTEX)
                 .module(vert_module)
@@ -29,6 +31,10 @@ impl Aura {
                 .stage(vk::ShaderStageFlags::FRAGMENT)
                 .module(frag_module)
                 .name(entry_point),
-        ]
+        ];
+
+
+        
+        shader_stages
     }
 }

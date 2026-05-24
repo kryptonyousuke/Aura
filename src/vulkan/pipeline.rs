@@ -1,8 +1,30 @@
 use crate::vulkan::vk_init::Aura;
-use ash::vk::{self, TaggedStructure};
+use ash::{vk::{self, TaggedStructure}};
+
+
+pub trait Pipeline {
+    fn create_video_descriptor_set_layout(
+        device: &ash::Device,
+        video_sampler: &vk::Sampler,
+    ) -> vk::DescriptorSetLayout;
+    fn update_video_descriptor_set(
+        device: &ash::Device,
+        descriptor_set: vk::DescriptorSet,
+        current_dpb_image_view: vk::ImageView,
+    );
+    fn create_pipeline_layout(
+        device: &ash::Device,
+        descriptor_set_layouts: &[vk::DescriptorSetLayout],
+    ) -> vk::PipelineLayout;
+    fn create_pipeline(
+        device: &ash::Device,
+        pipeline_layout: vk::PipelineLayout,
+        shader_stages: &[vk::PipelineShaderStageCreateInfo],
+    ) -> vk::Pipeline;
+}
 
 #[allow(dead_code)]
-impl Aura {
+impl Pipeline for Aura {
     fn create_video_descriptor_set_layout(
         device: &ash::Device,
         video_sampler: &vk::Sampler,
@@ -84,15 +106,16 @@ impl Aura {
         let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
         let dynamic_state_info =
             vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+        let vertex_input_dynamic_state = vk::PipelineVertexInputStateCreateInfo::default();
         let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
             .push(&mut rendering_info)
+            .vertex_input_state(&vertex_input_dynamic_state)
             .stages(shader_stages)
             .color_blend_state(&color_blend_info)
             .input_assembly_state(&input_assembly_info)
             .viewport_state(&viewport_state_info)
             .rasterization_state(&rasterization_info)
             .multisample_state(&multisample_info)
-            .render_pass(vk::RenderPass::null())
             .layout(pipeline_layout)
             .subpass(0)
             .dynamic_state(&dynamic_state_info);
