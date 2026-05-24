@@ -28,10 +28,6 @@ pub trait Decoder {
         device: &ash::Device,
         format: vk::Format,
     ) -> vk::SamplerYcbcrConversion;
-    unsafe fn create_video_sampler(
-        device: &ash::Device,
-        conversion: vk::SamplerYcbcrConversion,
-    ) -> vk::Sampler;
     unsafe fn transition_dpb_to_graphic(
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,
@@ -242,27 +238,6 @@ impl Decoder for Aura {
             device
                 .create_sampler_ycbcr_conversion(&ycbcr_info, None)
                 .expect("Failed to create YCbCr conversion.")
-        }
-    }
-    unsafe fn create_video_sampler(
-        device: &ash::Device,
-        conversion: vk::SamplerYcbcrConversion,
-    ) -> vk::Sampler {
-        unsafe {
-            let mut conversion_info =
-                vk::SamplerYcbcrConversionInfo::default().conversion(conversion);
-
-            let sampler_info = vk::SamplerCreateInfo::default()
-                .mag_filter(vk::Filter::LINEAR)
-                .min_filter(vk::Filter::LINEAR)
-                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .push(&mut conversion_info);
-
-            device
-                .create_sampler(&sampler_info, None)
-                .expect("Failed to create a Vulkan Video Sampler.")
         }
     }
 
