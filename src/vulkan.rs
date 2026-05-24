@@ -8,3 +8,4 @@ pub mod pipeline;
 pub mod vk_init;
 pub mod wsi;
 pub mod sampler;
+pub mod swapchain;
