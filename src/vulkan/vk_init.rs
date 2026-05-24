@@ -208,7 +208,7 @@ impl Aura {
         let mut sync2_features =
             vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
         let mut video_maintenance =
-            vk::PhysicalDeviceVideoMaintenance1FeaturesKHR::default().video_maintenance1(true);
+            vk::PhysicalDeviceVideoMaintenance2FeaturesKHR::default().video_maintenance2(true);
         let mut dynamic_rendering = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
         let mut sampler_ycbcr_conversion =
             vk::PhysicalDeviceSamplerYcbcrConversionFeaturesKHR::default()
