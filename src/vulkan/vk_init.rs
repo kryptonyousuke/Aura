@@ -933,6 +933,7 @@ impl Drop for Aura {
             self.device.destroy_pipeline(self.pipeline, None);
             self.device.destroy_pipeline_layout(self.pipeline_layout, None);
             self.device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            self.device.destroy_sampler(self.video_sampler, None);
             
             self.device
                 .destroy_command_pool(self.graphics_command_pool, None);
