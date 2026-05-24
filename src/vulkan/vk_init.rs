@@ -100,6 +100,15 @@ impl Aura {
     pub fn new(window: &winit::window::Window) -> Self {
         let dpb_pool_size = 16;
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
+        match unsafe { entry.try_enumerate_instance_version().unwrap() } {
+            Some(version) => {
+                let major = vk::api_version_major(version);
+                let minor = vk::api_version_minor(version);
+                let patch = vk::api_version_patch(version);
+                log::info!("Vulkan {}.{}.{}", major, minor, patch);
+            }
+            None => log::info!("Vulkan 1.0")
+        }
         let validation_layer = c"VK_LAYER_KHRONOS_validation";
         let layer_names: Vec<*const std::os::raw::c_char> = if cfg!(debug_assertions) {
             vec![validation_layer.as_ptr()]
@@ -143,7 +152,6 @@ impl Aura {
             .application_info(&app_info)
             .enabled_layer_names(&layers_pointers)
             .enabled_extension_names(&instance_extensions);
-
         let instance = unsafe {
             entry
                 .create_instance(&instance_create_info, None)
