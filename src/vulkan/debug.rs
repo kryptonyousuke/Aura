@@ -1,23 +1,69 @@
-use ash::vk::{self, TaggedStructure};
-use std::ffi::CStr;
 use crate::vulkan::vk_init::Aura;
+use ash::vk::{self, TaggedStructure};
+use owo_colors::OwoColorize;
+use std::ffi::CStr;
 
 pub unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    _message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
     _p_user_data: *mut std::ffi::c_void,
 ) -> vk::Bool32 {
-    unsafe {
-        let callback_data = *p_callback_data;
-        let message = CStr::from_ptr(callback_data.p_message).to_string_lossy();
-        println!(
-            "[Vulkan Validation Layers] {:?} - {:?}",
-            message_severity, message
-        );
+    let callback_data = *p_callback_data;
+    if callback_data.p_message.is_null() {
+        return vk::FALSE;
     }
+
+    let raw_message = CStr::from_ptr(callback_data.p_message).to_string_lossy();
+
+    let (severity_label, message_color) = match message_severity {
+        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => {
+            ("❌ VULKAN ERROR", owo_colors::AnsiColors::Red)
+        }
+        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => {
+            ("⚠️  VULKAN WARNING", owo_colors::AnsiColors::Yellow)
+        }
+        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => {
+            ("ℹ️  VULKAN INFO", owo_colors::AnsiColors::Green)
+        }
+        _ => ("🔍 VULKAN VERBOSE", owo_colors::AnsiColors::BrightBlack),
+    };
+    let vuid = if let Some(start) = raw_message.find("[ ") {
+        if let Some(end) = raw_message[start..].find(" ]") {
+            Some(&raw_message[start + 2..start + end])
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    println!("{}", "─".repeat(80).dimmed());
+
+    if let Some(id) = vuid {
+        println!(
+            "{} : {}",
+            severity_label.color(message_color).bold(),
+            id.cyan().bold()
+        );
+    } else {
+        println!("{}", severity_label.color(message_color).bold());
+    }
+
+    println!(
+        "{}\n  {:?}\n{}",
+        "Type:".bright_black().bold(),
+        message_type.magenta(),
+        "Details:".bright_black().bold()
+    );
+    for line in raw_message.lines() {
+        println!("  {}", line);
+    }
+
+    println!("{}", "─".repeat(80).dimmed());
+
     vk::FALSE
 }
+
 impl Aura {
     pub fn log_formats(
         physical_device: vk::PhysicalDevice,
