@@ -1,6 +1,6 @@
 use crate::vulkan::vk_init::Aura;
 use ash::khr::video_queue;
-use ash::vk::TaggedStructure;
+use ash::vk::{DependencyInfo, TaggedStructure};
 use ash::{Device, Instance, vk};
 
 pub trait Decoder {
@@ -32,7 +32,7 @@ pub trait Decoder {
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
-        image_layout: vk::ImageLayout,
+        subresource_range: vk::ImageSubresourceRange,
         video_queue_family: u32,
         graphics_queue_family: u32,
     );
@@ -40,15 +40,15 @@ pub trait Decoder {
         device: &ash::Device,
         cmd_buf_video: vk::CommandBuffer,
         dst_image: vk::Image,
-        image_layout: vk::ImageLayout,
+        subresource_range: vk::ImageSubresourceRange,
         video_queue_family: u32,
         graphics_queue_family: u32,
     );
     unsafe fn release_dst_on_graphic(
         device: &ash::Device,
-        cmd_buf_graphics: vk::CommandBuffer,
+        cmd_buf_video: vk::CommandBuffer,
         dst_image: vk::Image,
-        decode_layout: vk::ImageLayout,
+        subresource_range: vk::ImageSubresourceRange,
         video_queue_family: u32,
         graphics_queue_family: u32,
     );
@@ -56,7 +56,7 @@ pub trait Decoder {
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
-        decode_layout: vk::ImageLayout,
+        subresource_range: vk::ImageSubresourceRange,
         video_queue_family: u32,
         graphics_queue_family: u32,
     );
@@ -258,37 +258,93 @@ impl Decoder for Aura {
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
-        image_layout: vk::ImageLayout,
+        subresource_range: vk::ImageSubresourceRange,
         video_queue_family: u32,
         graphics_queue_family: u32,
     ) {
+        let image_barrier = vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::NONE)
+            .src_access_mask(vk::AccessFlags2::NONE)
+            .src_queue_family_index(video_queue_family)
+            .dst_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
+            .dst_access_mask(vk::AccessFlags2::SHADER_SAMPLED_READ)
+            .dst_queue_family_index(graphics_queue_family)
+            .subresource_range(subresource_range)
+            .image(dst_image)
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        let barriers = [image_barrier];
+        let dependency = vk::DependencyInfo::default().image_memory_barriers(&barriers);
+        unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };
     }
     unsafe fn acquire_image_graphic_on_dst(
         device: &ash::Device,
         cmd_buf_video: vk::CommandBuffer,
         dst_image: vk::Image,
-        image_layout: vk::ImageLayout,
+        subresource_range: vk::ImageSubresourceRange,
         video_queue_family: u32,
         graphics_queue_family: u32,
     ) {
+        let image_barrier = vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::NONE)
+            .src_access_mask(vk::AccessFlags2::NONE)
+            .src_queue_family_index(graphics_queue_family)
+            .dst_stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)
+            .dst_access_mask(vk::AccessFlags2::VIDEO_DECODE_WRITE_KHR)
+            .dst_queue_family_index(video_queue_family)
+            .subresource_range(subresource_range)
+            .image(dst_image)
+            .old_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+            .new_layout(vk::ImageLayout::VIDEO_DECODE_DST_KHR);
+        let barriers = [image_barrier];
+        let dependency = vk::DependencyInfo::default().image_memory_barriers(&barriers);
+        unsafe { device.cmd_pipeline_barrier2(cmd_buf_video, &dependency) };
     }
     unsafe fn release_dst_on_graphic(
         device: &ash::Device,
-        cmd_buf_graphics: vk::CommandBuffer,
+        cmd_buf_video: vk::CommandBuffer,
         dst_image: vk::Image,
-        decode_layout: vk::ImageLayout,
+        subresource_range: vk::ImageSubresourceRange,
         video_queue_family: u32,
         graphics_queue_family: u32,
     ) {
+        let image_barrier = vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)
+            .src_access_mask(vk::AccessFlags2::VIDEO_DECODE_WRITE_KHR)
+            .src_queue_family_index(video_queue_family)
+            .dst_stage_mask(vk::PipelineStageFlags2::NONE)
+            .dst_access_mask(vk::AccessFlags2::NONE)
+            .dst_queue_family_index(graphics_queue_family)
+            .subresource_range(subresource_range)
+            .image(dst_image)
+            .old_layout(vk::ImageLayout::VIDEO_DECODE_DST_KHR)
+            .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        let barriers = [image_barrier];
+        let dependency = vk::DependencyInfo::default().image_memory_barriers(&barriers);
+        unsafe { device.cmd_pipeline_barrier2(cmd_buf_video, &dependency) };
     }
     unsafe fn release_graphic_on_dst(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
-        decode_layout: vk::ImageLayout,
+        subresource_range: vk::ImageSubresourceRange,
         video_queue_family: u32,
         graphics_queue_family: u32,
     ) {
+        let image_barrier = vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::NONE)
+            .src_access_mask(vk::AccessFlags2::NONE)
+            .src_queue_family_index(graphics_queue_family)
+            .dst_stage_mask(vk::PipelineStageFlags2::NONE)
+            .dst_access_mask(vk::AccessFlags2::NONE)
+            .dst_queue_family_index(video_queue_family)
+            .subresource_range(subresource_range)
+            .image(dst_image)
+            .old_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+            .new_layout(vk::ImageLayout::VIDEO_DECODE_DST_KHR);
+        let barriers = [image_barrier];
+        let dependency = vk::DependencyInfo::default().image_memory_barriers(&barriers);
+        unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };
     }
 
     /*
