@@ -1,12 +1,17 @@
 use crate::vulkan::vk_init::Aura;
-use ash::{vk::{self, TaggedStructure}};
-
+use ash::vk::{self, TaggedStructure};
 
 pub trait Pipeline {
     fn create_video_descriptor_set_layout(
         device: &ash::Device,
         video_sampler: &vk::Sampler,
     ) -> vk::DescriptorSetLayout;
+    fn create_descriptor_pool(device: &ash::Device) -> vk::DescriptorPool;
+    fn allocate_descriptor_set(
+        device: &ash::Device,
+        layout: vk::DescriptorSetLayout,
+        descriptor_pool: vk::DescriptorPool,
+    ) -> vk::DescriptorSet;
     fn update_video_descriptor_set(
         device: &ash::Device,
         descriptor_set: vk::DescriptorSet,
@@ -23,7 +28,6 @@ pub trait Pipeline {
     ) -> vk::Pipeline;
 }
 
-#[allow(dead_code)]
 impl Pipeline for Aura {
     fn create_video_descriptor_set_layout(
         device: &ash::Device,
@@ -42,6 +46,31 @@ impl Pipeline for Aura {
                 .create_descriptor_set_layout(&layout_info, None)
                 .expect("Failed to create Descriptor Set Layout to the video.")
         }
+    }
+
+    fn create_descriptor_pool(device: &ash::Device) -> vk::DescriptorPool {
+        let pool_sizes = vk::DescriptorPoolSize::default()
+            .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .descriptor_count(3);
+        let pool_sizes = [pool_sizes];
+        let pool_info = vk::DescriptorPoolCreateInfo::default()
+            .max_sets(3)
+            .pool_sizes(&pool_sizes);
+        unsafe { device.create_descriptor_pool(&pool_info, None).unwrap() }
+    }
+
+    fn allocate_descriptor_set(
+        device: &ash::Device,
+        layout: vk::DescriptorSetLayout,
+        descriptor_pool: vk::DescriptorPool,
+    ) -> vk::DescriptorSet {
+        let layouts = [layout];
+        let allocate_info = vk::DescriptorSetAllocateInfo::default()
+            .descriptor_pool(descriptor_pool)
+            .set_layouts(&layouts);
+        log::debug!("Allocating descriptor set.");
+        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&allocate_info).unwrap() };
+        descriptor_sets[0]
     }
 
     fn update_video_descriptor_set(

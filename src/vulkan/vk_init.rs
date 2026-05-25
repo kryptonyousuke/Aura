@@ -2,8 +2,8 @@ use super::debug;
 use crate::vulkan::decoder::Decoder;
 use crate::vulkan::decoders::h264::H264Decoder;
 use crate::vulkan::pipeline::Pipeline;
-use crate::vulkan::shaders::Shaders;
 use crate::vulkan::sampler::Sampler;
+use crate::vulkan::shaders::Shaders;
 use ash::vk::{DebugUtilsMessengerEXT, TaggedStructure};
 use ash::{
     Entry, Instance,
@@ -84,10 +84,14 @@ pub struct Aura {
     pub present_complete_semaphores: Vec<vk::Semaphore>,
     pub render_complete_semaphores: Vec<vk::Semaphore>,
     pub render_fences: [vk::Fence; FRAMES_IN_FLIGHT as usize],
-    descriptor_set_layout: vk::DescriptorSetLayout,
+    pub descriptor_set_layout: vk::DescriptorSetLayout,
+    pub descriptor_pool: vk::DescriptorPool,
+    pub descriptor_set: vk::DescriptorSet,
     video_sampler: vk::Sampler,
-    pipeline_layout: vk::PipelineLayout,
-    pipeline: vk::Pipeline,
+    pub pipeline_layout: vk::PipelineLayout,
+    pub pipeline: vk::Pipeline,
+    pub viewport: vk::Viewport,
+    pub scissor: vk::Rect2D,
     pub extent: vk::Extent2D,
     pub ycbcr_conversion: vk::SamplerYcbcrConversion,
     pub frames_in_flight: u8,
@@ -107,7 +111,7 @@ impl Aura {
                 let patch = vk::api_version_patch(version);
                 log::info!("Vulkan {}.{}.{}", major, minor, patch);
             }
-            None => log::info!("Vulkan 1.0")
+            None => log::info!("Vulkan 1.0"),
         }
         let validation_layer = c"VK_LAYER_KHRONOS_validation";
         let layer_names: Vec<*const std::os::raw::c_char> = if cfg!(debug_assertions) {
@@ -209,7 +213,8 @@ impl Aura {
             vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
         let mut video_maintenance =
             vk::PhysicalDeviceVideoMaintenance2FeaturesKHR::default().video_maintenance2(true);
-        let mut dynamic_rendering = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
+        let mut dynamic_rendering =
+            vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
         let mut sampler_ycbcr_conversion =
             vk::PhysicalDeviceSamplerYcbcrConversionFeaturesKHR::default()
                 .sampler_ycbcr_conversion(true);
@@ -384,8 +389,8 @@ impl Aura {
         for i in 0..FRAMES_IN_FLIGHT {
             unsafe {
                 frames_in_flight_fences[i as usize] = device
-                        .create_fence(&frames_in_flight_fences_info, None)
-                        .unwrap();
+                    .create_fence(&frames_in_flight_fences_info, None)
+                    .unwrap();
             }
         }
         let vert_module = crate::create_shader!(device, "full_screen.vert.spv");
@@ -393,13 +398,29 @@ impl Aura {
         let shader_stages = Self::create_shader_stages(&device, vert_module, frag_module);
 
         let video_sampler = Self::create_sampler(&device, ycbcr_conversion);
-        let descriptor_set_layout = Self::create_video_descriptor_set_layout(&device, &video_sampler);
+        let descriptor_set_layout =
+            Self::create_video_descriptor_set_layout(&device, &video_sampler);
         let descriptor_set_layouts = &[descriptor_set_layout];
+        let descriptor_pool = Self::create_descriptor_pool(&device);
+        let descriptor_set =
+            Self::allocate_descriptor_set(&device, descriptor_set_layout, descriptor_pool);
         let pipeline_layout = Self::create_pipeline_layout(&device, descriptor_set_layouts);
         let pipeline = Self::create_pipeline(&device, pipeline_layout, &shader_stages);
         unsafe {
             device.destroy_shader_module(vert_module, None);
             device.destroy_shader_module(frag_module, None);
+        };
+        let viewport = vk::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        };
+        let scissor = vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: swapchain_extent,
         };
         Self {
             _entry: entry,
@@ -444,6 +465,10 @@ impl Aura {
             descriptor_set_layout: descriptor_set_layout,
             pipeline_layout: pipeline_layout,
             pipeline: pipeline,
+            descriptor_pool: descriptor_pool,
+            descriptor_set: descriptor_set,
+            viewport: viewport,
+            scissor: scissor,
             extent: vk::Extent2D {
                 width: 1920,
                 height: 1080,
@@ -543,9 +568,12 @@ impl Aura {
 
         let mut dst_pool = Vec::with_capacity(dpb_pool_size);
         let mut dpb_pool = Vec::with_capacity(dpb_pool_size);
+        let mut local_ycbcr_info =
+            vk::SamplerYcbcrConversionInfo::default().conversion(ycbcr_conversion);
 
         for i in 0..dpb_pool_size {
             let dpb_view_info = vk::ImageViewCreateInfo::default()
+                .push(&mut local_ycbcr_info)
                 .image(dpb_image)
                 .view_type(vk::ImageViewType::TYPE_2D)
                 .format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
@@ -556,7 +584,6 @@ impl Aura {
                     base_array_layer: i as u32,
                     layer_count: 1,
                 });
-
             let mut local_ycbcr_info =
                 vk::SamplerYcbcrConversionInfo::default().conversion(ycbcr_conversion);
 
@@ -761,16 +788,18 @@ impl Drop for Aura {
             log::debug!("Sync resources successfully destroyed.");
 
             self.device.destroy_pipeline(self.pipeline, None);
-            self.device.destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device
+                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
             self.device.destroy_sampler(self.video_sampler, None);
-            
+
             self.device
                 .destroy_command_pool(self.graphics_command_pool, None);
             self.device
                 .destroy_command_pool(self.video_command_pool, None);
             log::debug!("Successfully destroyed all command pools.");
-            
+
             for (_, _, view) in &self.dpb_pool {
                 self.device.destroy_image_view(*view, None);
             }

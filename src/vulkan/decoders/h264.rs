@@ -1,6 +1,8 @@
+use crate::vulkan::decoder::Decoder;
+use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::vk_init::Aura;
 use ash::khr::video_queue;
-use ash::vk::TaggedStructure;
+use ash::vk::{BindDescriptorSetsInfo, TaggedStructure};
 use ash::{Device, vk};
 use rayon::prelude::*;
 use std::mem::MaybeUninit;
@@ -16,8 +18,8 @@ pub trait H264Decoder {
 impl H264Decoder for Aura {
     fn decode_frame(&mut self, bitstream_data: &[u8], is_first_frame: bool) {
         let frame_idx = (self.current_frame_index % self.dpb_pool_size) as usize;
-        let (_, _, dst_view) = self.dst_pool[frame_idx];
-        let (_, _, dpb_view) = self.dpb_pool[frame_idx];
+        let (dst_image, _, dst_view) = self.dst_pool[frame_idx];
+        let (dpb_image, _, dpb_view) = self.dpb_pool[frame_idx];
         log::debug!("current_frame_index: {}", self.current_frame_index);
         log::debug!("dpb_pool_size: {}", self.dpb_pool_size);
         log::debug!("frame_idx: {}", frame_idx);
@@ -42,7 +44,26 @@ impl H264Decoder for Aura {
                     vk::Fence::null(),
                 )
                 .unwrap();
+            let color_attachment_info = vk::RenderingAttachmentInfoKHR::default()
+                .image_view(self.swapchain_image_views[image_index as usize])
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .clear_value(vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: [0.0, 0.0, 0.0, 1.0],
+                    },
+                });
 
+            let color_attachments = [color_attachment_info];
+
+            let rendering_info = vk::RenderingInfoKHR::default()
+                .render_area(vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent: self.swapchain_extent,
+                })
+                .layer_count(1)
+                .color_attachments(&color_attachments);
             let begin_info = vk::CommandBufferBeginInfo::default()
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
@@ -230,15 +251,6 @@ impl H264Decoder for Aura {
                 &vk::VideoEndCodingInfoKHR::default(),
             );
 
-            // Aura::transition_dpb_to_graphic(
-            //     &self.device,
-            //     self.video_command_buffers[swapchain_sync_idx],
-            //     self.dpb_pool[image_index as usize].0,
-            //     0,
-            //     self._video_queue_family_index,
-            //     self._graphics_queue_family_index,
-            // );
-
             self.device
                 .end_command_buffer(self.video_command_buffers[swapchain_sync_idx])
                 .expect("Erro buffer");
@@ -263,6 +275,63 @@ impl H264Decoder for Aura {
                     self.render_fences[swapchain_sync_idx],
                 )
                 .unwrap();
+            self.device
+                .begin_command_buffer(
+                    self.graphics_command_buffer,
+                    &vk::CommandBufferBeginInfo::default(),
+                )
+                .unwrap();
+
+            self.device.cmd_bind_pipeline(
+                self.graphics_command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.pipeline,
+            );
+            let descriptor_sets = [self.descriptor_set];
+            let bind_descriptor_sets_info = vk::BindDescriptorSetsInfo::default()
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                .descriptor_sets(&descriptor_sets)
+                .layout(self.pipeline_layout);
+
+            self.device.cmd_bind_descriptor_sets2(
+                self.graphics_command_buffer,
+                &bind_descriptor_sets_info,
+            );
+            self.device
+                .cmd_begin_rendering(self.graphics_command_buffer, &rendering_info);
+            let viewport = [self.viewport];
+            let scissor = [self.scissor];
+            self.device
+                .cmd_set_viewport(self.graphics_command_buffer, 0, &viewport);
+            self.device
+                .cmd_set_scissor(self.graphics_command_buffer, 0, &scissor);
+
+            self.device
+                .cmd_draw(self.graphics_command_buffer, 3, 1, 0, 0);
+
+            self.device.cmd_end_rendering(self.graphics_command_buffer);
+
+            let cmd_buf_graphics_info =
+                [vk::CommandBufferSubmitInfo::default()
+                    .command_buffer(self.graphics_command_buffer)];
+            let cmd_buf_graphics_wait_infos = [vk::SemaphoreSubmitInfo::default()
+                .semaphore(self.render_complete_semaphores[image_index as usize])
+                .stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)];
+            self.device
+                .end_command_buffer(self.graphics_command_buffer)
+                .unwrap();
+            let graphics_submit = vk::SubmitInfo2::default()
+                .command_buffer_infos(&cmd_buf_graphics_info)
+                .wait_semaphore_infos(&cmd_buf_graphics_wait_infos);
+
+            self.device
+                .queue_submit2(
+                    self.graphics_queue,
+                    &[graphics_submit],
+                    self.render_fences[swapchain_sync_idx],
+                )
+                .unwrap();
+
             let swapchains = [self.swapchain];
             let image_indices = [image_index];
             let present_wait_semaphores = [self.render_complete_semaphores[image_index as usize]];

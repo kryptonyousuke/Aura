@@ -28,30 +28,39 @@ pub trait Decoder {
         device: &ash::Device,
         format: vk::Format,
     ) -> vk::SamplerYcbcrConversion;
-    unsafe fn transition_dpb_to_graphic(
-        device: &ash::Device,
-        command_buffer: vk::CommandBuffer,
-        image: vk::Image,
-        current_layer: u32,
-        video_queue_index: u32,
-        graphics_queue_index: u32,
-    );
-    unsafe fn transition_graphic_to_dpb(
-        device: &ash::Device,
-        command_buffer: vk::CommandBuffer,
-        image: vk::Image,
-        current_layer: u32,
-        video_queue_index: u32,
-        graphics_queue_index: u32,
-    );
-    unsafe fn acquire_dpb_on_graphic(
+    unsafe fn acquire_image_dst_on_graphic(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
-        dpb_image: vk::Image,
+        dst_image: vk::Image,
+        image_layout: vk::ImageLayout,
+        video_queue_family: u32,
+        graphics_queue_family: u32,
+    );
+    unsafe fn acquire_image_graphic_on_dst(
+        device: &ash::Device,
+        cmd_buf_video: vk::CommandBuffer,
+        dst_image: vk::Image,
+        image_layout: vk::ImageLayout,
+        video_queue_family: u32,
+        graphics_queue_family: u32,
+    );
+    unsafe fn release_dst_on_graphic(
+        device: &ash::Device,
+        cmd_buf_graphics: vk::CommandBuffer,
+        dst_image: vk::Image,
         decode_layout: vk::ImageLayout,
         video_queue_family: u32,
         graphics_queue_family: u32,
     );
+    unsafe fn release_graphic_on_dst(
+        device: &ash::Device,
+        cmd_buf_graphics: vk::CommandBuffer,
+        dst_image: vk::Image,
+        decode_layout: vk::ImageLayout,
+        video_queue_family: u32,
+        graphics_queue_family: u32,
+    );
+
     fn copy_image(
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,
@@ -77,7 +86,11 @@ impl Decoder for Aura {
             .push(&mut h264_profile);
         let mut header_version = vk::ExtensionProperties::default();
         let name = c"VK_STD_vulkan_video_codec_h264_decode";
-        for (dest, &src) in header_version.extension_name.iter_mut().zip(name.to_bytes_with_nul()) {
+        for (dest, &src) in header_version
+            .extension_name
+            .iter_mut()
+            .zip(name.to_bytes_with_nul())
+        {
             *dest = src as i8;
         }
         header_version.spec_version = vk::make_api_version(0, 1, 0, 0);
@@ -241,102 +254,41 @@ impl Decoder for Aura {
         }
     }
 
-    unsafe fn transition_dpb_to_graphic(
-        device: &ash::Device,
-        command_buffer: vk::CommandBuffer,
-        image: vk::Image,
-        current_layer: u32,
-        video_queue_index: u32,
-        graphics_queue_index: u32,
-    ) {
-        unsafe {
-            let barrier = [vk::ImageMemoryBarrier2::default()
-                .src_queue_family_index(video_queue_index)
-                .src_stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)
-                .src_access_mask(vk::AccessFlags2::VIDEO_DECODE_WRITE_KHR)
-                .dst_queue_family_index(graphics_queue_index)
-                .dst_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
-                .dst_access_mask(vk::AccessFlags2::SHADER_READ_KHR)
-                .old_layout(vk::ImageLayout::VIDEO_DECODE_DPB_KHR)
-                .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .image(image)
-                .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: current_layer,
-                    layer_count: 1,
-                })];
-
-            let dependency_info = vk::DependencyInfo::default().image_memory_barriers(&barrier);
-            device.cmd_pipeline_barrier2(command_buffer, &dependency_info);
-        }
-    }
-
-    unsafe fn transition_graphic_to_dpb(
-        device: &ash::Device,
-        command_buffer: vk::CommandBuffer,
-        image: vk::Image,
-        current_layer: u32,
-        video_queue_index: u32,
-        graphics_queue_index: u32,
-    ) {
-        unsafe {
-            let barrier = [vk::ImageMemoryBarrier2::default()
-                .src_queue_family_index(graphics_queue_index)
-                .src_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
-                .src_access_mask(vk::AccessFlags2::SHADER_READ_KHR)
-                .dst_queue_family_index(video_queue_index)
-                .dst_stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)
-                .dst_access_mask(vk::AccessFlags2::VIDEO_DECODE_WRITE_KHR)
-                .old_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                .new_layout(vk::ImageLayout::VIDEO_DECODE_DPB_KHR)
-                .image(image)
-                .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: current_layer,
-                    layer_count: 1,
-                })];
-
-            let dependency_info = vk::DependencyInfo::default().image_memory_barriers(&barrier);
-            device.cmd_pipeline_barrier2(command_buffer, &dependency_info);
-        }
-    }
-    unsafe fn acquire_dpb_on_graphic(
+    unsafe fn acquire_image_dst_on_graphic(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
-        dpb_image: vk::Image,
+        dst_image: vk::Image,
+        image_layout: vk::ImageLayout,
+        video_queue_family: u32,
+        graphics_queue_family: u32,
+    ) {
+    }
+    unsafe fn acquire_image_graphic_on_dst(
+        device: &ash::Device,
+        cmd_buf_video: vk::CommandBuffer,
+        dst_image: vk::Image,
+        image_layout: vk::ImageLayout,
+        video_queue_family: u32,
+        graphics_queue_family: u32,
+    ) {
+    }
+    unsafe fn release_dst_on_graphic(
+        device: &ash::Device,
+        cmd_buf_graphics: vk::CommandBuffer,
+        dst_image: vk::Image,
         decode_layout: vk::ImageLayout,
         video_queue_family: u32,
         graphics_queue_family: u32,
     ) {
-        let acquire_barrier = vk::ImageMemoryBarrier2::default()
-            .src_stage_mask(vk::PipelineStageFlags2::NONE)
-            .src_access_mask(vk::AccessFlags2::NONE)
-            .dst_stage_mask(vk::PipelineStageFlags2::TRANSFER)
-            .dst_access_mask(vk::AccessFlags2::TRANSFER_READ)
-            .old_layout(decode_layout)
-            .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
-            .src_queue_family_index(video_queue_family)
-            .dst_queue_family_index(graphics_queue_family)
-            .image(dpb_image)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            });
-
-        let dependency_info = vk::DependencyInfo::default()
-            .image_memory_barriers(std::slice::from_ref(&acquire_barrier));
-
-        // Grava a barreira no command buffer de gráficos
-        unsafe {
-            device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency_info);
-        }
+    }
+    unsafe fn release_graphic_on_dst(
+        device: &ash::Device,
+        cmd_buf_graphics: vk::CommandBuffer,
+        dst_image: vk::Image,
+        decode_layout: vk::ImageLayout,
+        video_queue_family: u32,
+        graphics_queue_family: u32,
+    ) {
     }
 
     /*
