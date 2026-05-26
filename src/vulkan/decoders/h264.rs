@@ -2,7 +2,7 @@ use crate::vulkan::decoder::Decoder;
 use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::vk_init::Aura;
 use ash::khr::video_queue;
-use ash::vk::{TaggedStructure};
+use ash::vk::TaggedStructure;
 use ash::{Device, vk};
 use rayon::prelude::*;
 use std::mem::MaybeUninit;
@@ -17,6 +17,7 @@ pub trait H264Decoder {
 }
 impl H264Decoder for Aura {
     fn decode_frame(&mut self, bitstream_data: &[u8], is_first_frame: bool) {
+        //std::thread::sleep(std::time::Duration::from_secs(2));
         let frame_idx = (self.current_frame_index % self.dpb_pool_size) as usize;
         let (dst_image, _, dst_view) = self.dst_pool[frame_idx];
         let (_dpb_image, _, dpb_view) = self.dpb_pool[frame_idx];
@@ -70,13 +71,19 @@ impl H264Decoder for Aura {
             self.device
                 .begin_command_buffer(self.video_command_buffers[swapchain_sync_idx], &begin_info)
                 .unwrap();
-            let subresource_range = vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            };
+            let subresource_range = vk::ImageSubresourceRange::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .base_mip_level(0)
+                .level_count(1)
+                .base_array_layer(frame_idx as u32)
+                .layer_count(1);
+            let swapchain_subresource_range = vk::ImageSubresourceRange::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .base_mip_level(0)
+                .level_count(1)
+                .base_array_layer(0)
+                .layer_count(1);
+
             let image_barriers = [
                 vk::ImageMemoryBarrier2::default()
                     .src_stage_mask(vk::PipelineStageFlags2::NONE)
@@ -272,17 +279,12 @@ impl H264Decoder for Aura {
                 .wait_semaphore_infos(present_semaphores_submit_info)
                 .signal_semaphore_infos(render_semaphores_submit_info);
             self.device
-                .queue_submit2(
-                    self.video_queue,
-                    &[submit_info],
-                    self.render_fences[swapchain_sync_idx],
-                )
+                .queue_submit2(self.video_queue, &[submit_info], vk::Fence::null())
                 .unwrap();
             log::debug!("Video submition ended.");
-
             self.device
                 .begin_command_buffer(
-                    self.graphics_command_buffer,
+                    self.graphics_command_buffers[swapchain_sync_idx],
                     &vk::CommandBufferBeginInfo::default(),
                 )
                 .unwrap();
@@ -291,7 +293,7 @@ impl H264Decoder for Aura {
 
             Aura::acquire_image_dst_on_graphic(
                 &self.device,
-                self.graphics_command_buffer,
+                self.graphics_command_buffers[swapchain_sync_idx],
                 dst_image,
                 subresource_range,
                 self._video_queue_family_index,
@@ -300,70 +302,109 @@ impl H264Decoder for Aura {
             log::debug!("Passed.");
 
             self.device.cmd_bind_pipeline(
-                self.graphics_command_buffer,
+                self.graphics_command_buffers[swapchain_sync_idx],
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline,
             );
-            let descriptor_sets = [self.descriptor_set];
+            let descriptor_sets = [self.descriptor_sets[swapchain_sync_idx]];
             let bind_descriptor_sets_info = vk::BindDescriptorSetsInfo::default()
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .descriptor_sets(&descriptor_sets)
                 .layout(self.pipeline_layout);
 
             self.device.cmd_bind_descriptor_sets2(
-                self.graphics_command_buffer,
+                self.graphics_command_buffers[swapchain_sync_idx],
                 &bind_descriptor_sets_info,
             );
-            Aura::update_video_descriptor_set(&self.device, self.descriptor_set, dst_view);
+            Aura::update_video_descriptor_set(
+                &self.device,
+                self.descriptor_sets[swapchain_sync_idx],
+                dst_view,
+            );
+
+            log::debug!("Acquire swapchain image on graphics.");
+            Aura::acquire_swapchain_barrier(
+                &self.device,
+                self.graphics_command_buffers[swapchain_sync_idx],
+                self.swapchain_images[image_index as usize],
+                swapchain_subresource_range,
+                self._graphics_queue_family_index,
+            );
+            log::debug!("Passed.");
+            self.device.cmd_begin_rendering(
+                self.graphics_command_buffers[swapchain_sync_idx],
+                &rendering_info,
+            );
+            let viewport = [self.viewport];
+            let scissor = [self.scissor];
+            self.device.cmd_set_viewport(
+                self.graphics_command_buffers[swapchain_sync_idx],
+                0,
+                &viewport,
+            );
+            self.device.cmd_set_scissor(
+                self.graphics_command_buffers[swapchain_sync_idx],
+                0,
+                &scissor,
+            );
+
+            self.device.cmd_draw(
+                self.graphics_command_buffers[swapchain_sync_idx],
+                3,
+                1,
+                0,
+                0,
+            );
+
+            self.device
+                .cmd_end_rendering(self.graphics_command_buffers[swapchain_sync_idx]);
+
+            let cmd_buf_graphics_info = [vk::CommandBufferSubmitInfo::default()
+                .command_buffer(self.graphics_command_buffers[swapchain_sync_idx])];
+            let cmd_buf_graphics_wait_infos = [vk::SemaphoreSubmitInfo::default()
+                .semaphore(self.render_complete_semaphores[image_index as usize])
+                .stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)];
 
             log::debug!("Release Graphic on DST");
-
             Aura::release_graphic_on_dst(
                 &self.device,
-                self.graphics_command_buffer,
+                self.graphics_command_buffers[swapchain_sync_idx],
                 dst_image,
                 subresource_range,
                 self._video_queue_family_index,
                 self._graphics_queue_family_index,
             );
             log::debug!("Passed.");
-            Aura::acquire_swapchain_barrier(&self.device, self.graphics_command_buffer, self.swapchain_images[swapchain_sync_idx], subresource_range, self._graphics_queue_family_index);
-            self.device
-                .cmd_begin_rendering(self.graphics_command_buffer, &rendering_info);
-            let viewport = [self.viewport];
-            let scissor = [self.scissor];
-            self.device
-                .cmd_set_viewport(self.graphics_command_buffer, 0, &viewport);
-            self.device
-                .cmd_set_scissor(self.graphics_command_buffer, 0, &scissor);
+
+            Aura::release_swapchain_barrier(
+                &self.device,
+                self.graphics_command_buffers[swapchain_sync_idx],
+                self.swapchain_images[image_index as usize],
+                swapchain_subresource_range,
+                self._graphics_queue_family_index,
+            );
 
             self.device
-                .cmd_draw(self.graphics_command_buffer, 3, 1, 0, 0);
-
-            self.device.cmd_end_rendering(self.graphics_command_buffer);
-
-            let cmd_buf_graphics_info =
-                [vk::CommandBufferSubmitInfo::default()
-                    .command_buffer(self.graphics_command_buffer)];
-            let cmd_buf_graphics_wait_infos = [vk::SemaphoreSubmitInfo::default()
-                .semaphore(self.render_complete_semaphores[image_index as usize])
-                .stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)];
-            Aura::release_swapchain_barrier(&self.device, self.graphics_command_buffer, self.swapchain_images[swapchain_sync_idx], subresource_range, self._graphics_queue_family_index);
-            
-            self.device
-                .end_command_buffer(self.graphics_command_buffer)
+                .end_command_buffer(self.graphics_command_buffers[swapchain_sync_idx])
                 .unwrap();
+            let cmd_buf_graphics_complete_infos = [vk::SemaphoreSubmitInfo::default()
+                .semaphore(self.graphics_complete_semaphores[image_index as usize])];
             let graphics_submit = vk::SubmitInfo2::default()
                 .command_buffer_infos(&cmd_buf_graphics_info)
-                .wait_semaphore_infos(&cmd_buf_graphics_wait_infos);
+                .wait_semaphore_infos(&cmd_buf_graphics_wait_infos)
+                .signal_semaphore_infos(&cmd_buf_graphics_complete_infos);
             self.device
-                .queue_submit2(self.graphics_queue, &[graphics_submit], vk::Fence::null())
+                .queue_submit2(
+                    self.graphics_queue,
+                    &[graphics_submit],
+                    self.render_fences[swapchain_sync_idx],
+                )
                 .unwrap();
             log::debug!("Graphics submition ended.");
 
             let swapchains = [self.swapchain];
             let image_indices = [image_index];
-            let present_wait_semaphores = [self.render_complete_semaphores[image_index as usize]];
+            let present_wait_semaphores = [self.graphics_complete_semaphores[image_index as usize]];
 
             let present_info = vk::PresentInfoKHR::default()
                 .wait_semaphores(&present_wait_semaphores)

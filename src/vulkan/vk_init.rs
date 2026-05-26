@@ -72,7 +72,7 @@ pub struct Aura {
     pub(super) current_frame_index: usize,
     pub(super) dpb_pool_size: usize,
     pub graphics_command_pool: vk::CommandPool,
-    pub graphics_command_buffer: vk::CommandBuffer,
+    pub graphics_command_buffers: Vec<vk::CommandBuffer>,
     pub video_command_pool: vk::CommandPool,
     pub video_command_buffers: Vec<vk::CommandBuffer>,
     pub swapchain_loader: ash::khr::swapchain::Device,
@@ -83,10 +83,11 @@ pub struct Aura {
     pub swapchain_extent: vk::Extent2D,
     pub present_complete_semaphores: Vec<vk::Semaphore>,
     pub render_complete_semaphores: Vec<vk::Semaphore>,
+    pub graphics_complete_semaphores: Vec<vk::Semaphore>,
     pub render_fences: [vk::Fence; FRAMES_IN_FLIGHT as usize],
-    pub descriptor_set_layout: vk::DescriptorSetLayout,
+    pub descriptor_set_layouts: Vec<vk::DescriptorSetLayout>,
     pub descriptor_pool: vk::DescriptorPool,
-    pub descriptor_set: vk::DescriptorSet,
+    pub descriptor_sets: Vec<vk::DescriptorSet>,
     video_sampler: vk::Sampler,
     pub pipeline_layout: vk::PipelineLayout,
     pub pipeline: vk::Pipeline,
@@ -341,11 +342,11 @@ impl Aura {
         };
         let graphics_cmd_alloc = vk::CommandBufferAllocateInfo::default()
             .command_pool(graphics_command_pool)
-            .command_buffer_count(1);
-        let graphics_command_buffer = unsafe {
+            .command_buffer_count(FRAMES_IN_FLIGHT as u32);
+        let graphics_command_buffers = unsafe {
             device
                 .allocate_command_buffers(&graphics_cmd_alloc)
-                .unwrap()[0]
+                .unwrap()
         };
 
         let video_alloc_info = vk::CommandBufferAllocateInfo::default()
@@ -369,6 +370,7 @@ impl Aura {
 
         let mut present_complete_semaphores = Vec::new();
         let mut render_complete_semaphores = Vec::new();
+        let mut graphics_complete_semaphores = Vec::new();
 
         for _ in 0..swapchain_images.len() {
             unsafe {
@@ -382,10 +384,16 @@ impl Aura {
                         .create_semaphore(&semaphore_create_info, None)
                         .unwrap(),
                 );
+                graphics_complete_semaphores.push(
+                    device
+                        .create_semaphore(&semaphore_create_info, None)
+                        .unwrap(),
+                );
             }
         }
 
         let mut frames_in_flight_fences = [vk::Fence::null(); FRAMES_IN_FLIGHT as usize];
+
         for i in 0..FRAMES_IN_FLIGHT {
             unsafe {
                 frames_in_flight_fences[i as usize] = device
@@ -398,13 +406,18 @@ impl Aura {
         let shader_stages = Self::create_shader_stages(&device, vert_module, frag_module);
 
         let video_sampler = Self::create_sampler(&device, ycbcr_conversion);
-        let descriptor_set_layout =
-            Self::create_video_descriptor_set_layout(&device, &video_sampler);
-        let descriptor_set_layouts = &[descriptor_set_layout];
-        let descriptor_pool = Self::create_descriptor_pool(&device);
-        let descriptor_set =
-            Self::allocate_descriptor_set(&device, descriptor_set_layout, descriptor_pool);
-        let pipeline_layout = Self::create_pipeline_layout(&device, descriptor_set_layouts);
+        let mut descriptor_set_layouts = Vec::new();
+        for _ in 0..FRAMES_IN_FLIGHT {
+            descriptor_set_layouts.push(Self::create_video_descriptor_set_layout(
+                &device,
+                &video_sampler,
+                FRAMES_IN_FLIGHT as u32,
+            ));
+        }
+        let descriptor_pool = Self::create_descriptor_pool(&device, FRAMES_IN_FLIGHT as u32);
+        let descriptor_sets =
+            Self::allocate_descriptor_sets(&device, &descriptor_set_layouts, descriptor_pool);
+        let pipeline_layout = Self::create_pipeline_layout(&device, &descriptor_set_layouts);
         let pipeline = Self::create_pipeline(&device, pipeline_layout, &shader_stages);
         unsafe {
             device.destroy_shader_module(vert_module, None);
@@ -422,6 +435,7 @@ impl Aura {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: swapchain_extent,
         };
+        log::debug!("Descriptor sets size: {}", descriptor_sets.len());
         Self {
             _entry: entry,
             _instance: instance,
@@ -443,7 +457,7 @@ impl Aura {
             video_loader: video_loader,
             decode_loader: decode_loader,
             ycbcr_conversion: ycbcr_conversion,
-            graphics_command_buffer: graphics_command_buffer,
+            graphics_command_buffers: graphics_command_buffers,
             video_command_buffers: video_command_buffers,
             graphics_queue: graphics_queue,
             video_queue: video_queue,
@@ -460,13 +474,14 @@ impl Aura {
             swapchain_extent: swapchain_extent,
             present_complete_semaphores: present_complete_semaphores,
             render_complete_semaphores: render_complete_semaphores,
+            graphics_complete_semaphores: graphics_complete_semaphores,
             render_fences: frames_in_flight_fences,
             video_sampler: video_sampler,
-            descriptor_set_layout: descriptor_set_layout,
+            descriptor_set_layouts: descriptor_set_layouts,
             pipeline_layout: pipeline_layout,
             pipeline: pipeline,
             descriptor_pool: descriptor_pool,
-            descriptor_set: descriptor_set,
+            descriptor_sets: descriptor_sets,
             viewport: viewport,
             scissor: scissor,
             extent: vk::Extent2D {
@@ -785,13 +800,18 @@ impl Drop for Aura {
             for &semaphore in &self.render_complete_semaphores {
                 self.device.destroy_semaphore(semaphore, None);
             }
+            for &semaphore in &self.graphics_complete_semaphores {
+                self.device.destroy_semaphore(semaphore, None);
+            }
             log::debug!("Sync resources successfully destroyed.");
 
             self.device.destroy_pipeline(self.pipeline, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            for i in 0..self.descriptor_set_layouts.len() {
+                self.device
+                    .destroy_descriptor_set_layout(self.descriptor_set_layouts[i], None);
+            }
             self.device.destroy_sampler(self.video_sampler, None);
 
             self.device
@@ -819,7 +839,8 @@ impl Drop for Aura {
 
             self.device
                 .destroy_sampler_ycbcr_conversion(self.ycbcr_conversion, None);
-
+            self.device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
             self.device.destroy_device(None);
             log::info!("VkDevice successfully destroyed.");
 
