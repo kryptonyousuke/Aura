@@ -1,4 +1,4 @@
-pub fn avcc_to_annexb(data: &[u8], extradata: &[u8]) -> Result<Vec<u8>, &'static str> {
+pub fn avcc_to_annexb(data: &[u8], extradata: &[u8]) -> Result<(Vec<u8>, Vec<u32>), &'static str> {
     let nalu_length_size = if extradata.len() > 4 {
         ((extradata[4] & 0x03) + 1) as usize
     } else {
@@ -6,7 +6,7 @@ pub fn avcc_to_annexb(data: &[u8], extradata: &[u8]) -> Result<Vec<u8>, &'static
     };
 
     let mut out = Vec::with_capacity(data.len() + extradata.len() + 32);
-
+    let mut slice_offsets = Vec::new();
     if extradata.len() > 6 {
         let mut i = 5;
 
@@ -66,12 +66,14 @@ pub fn avcc_to_annexb(data: &[u8], extradata: &[u8]) -> Result<Vec<u8>, &'static
         if end_data > data.len() {
             return Err("Bad avcc packet. NALU's size is bigger than data.");
         }
-
+        let nalu_type = data[start_data] & 0x1F;
+        if nalu_type == 1 || nalu_type == 5 {
+            slice_offsets.push(out.len() as u32);
+        }
         out.extend_from_slice(&[0, 0, 0, 1]);
         out.extend_from_slice(&data[start_data..end_data]);
-
         offset = end_data;
     }
 
-    Ok(out)
+    Ok((out, slice_offsets))
 }

@@ -411,7 +411,7 @@ impl Aura {
             descriptor_set_layouts.push(Self::create_video_descriptor_set_layout(
                 &device,
                 &video_sampler,
-                FRAMES_IN_FLIGHT as u32,
+                1,
             ));
         }
         let descriptor_pool = Self::create_descriptor_pool(&device, FRAMES_IN_FLIGHT as u32);

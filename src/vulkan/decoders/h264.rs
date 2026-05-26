@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use std::mem::MaybeUninit;
 use std::u64;
 pub trait H264Decoder {
-    fn decode_frame(&mut self, bitstream_data: &[u8], is_first_frame: bool);
+    fn decode_frame(&mut self, bitstream_data: &[u8], slice_offsets: &[u32], is_first_frame: bool);
     unsafe fn create_h264_session_parameters(
         device: &Device,
         video_loader: &video_queue::Device,
@@ -16,7 +16,7 @@ pub trait H264Decoder {
     ) -> vk::VideoSessionParametersKHR;
 }
 impl H264Decoder for Aura {
-    fn decode_frame(&mut self, bitstream_data: &[u8], is_first_frame: bool) {
+    fn decode_frame(&mut self, bitstream_data: &[u8], slice_offsets: &[u32], is_first_frame: bool) {
         //std::thread::sleep(std::time::Duration::from_secs(2));
         let frame_idx = (self.current_frame_index % self.dpb_pool_size) as usize;
         let (dst_image, _, dst_view) = self.dst_pool[frame_idx];
@@ -72,7 +72,7 @@ impl H264Decoder for Aura {
                 .begin_command_buffer(self.video_command_buffers[swapchain_sync_idx], &begin_info)
                 .unwrap();
             let subresource_range = vk::ImageSubresourceRange::default()
-                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .aspect_mask(vk::ImageAspectFlags::PLANE_0 | vk::ImageAspectFlags::PLANE_1)
                 .base_mip_level(0)
                 .level_count(1)
                 .base_array_layer(frame_idx as u32)
@@ -121,7 +121,7 @@ impl H264Decoder for Aura {
 
             let mut h264_decode_info = vk::VideoDecodeH264PictureInfoKHR::default()
                 .std_picture_info(&std_pic_info)
-                .slice_offsets(&[0]);
+                .slice_offsets(slice_offsets);
 
             let mut std_setup_info: vk::native::StdVideoDecodeH264ReferenceInfo =
                 MaybeUninit::zeroed().assume_init();
@@ -250,7 +250,6 @@ impl H264Decoder for Aura {
                 self.video_command_buffers[swapchain_sync_idx],
                 &vk::VideoEndCodingInfoKHR::default(),
             );
-            log::debug!("Release DST on Graphic");
             Aura::release_dst_on_graphic(
                 &self.device,
                 self.video_command_buffers[swapchain_sync_idx],
@@ -259,7 +258,6 @@ impl H264Decoder for Aura {
                 self._video_queue_family_index,
                 self._graphics_queue_family_index,
             );
-            log::debug!("Passed.");
 
             self.device
                 .end_command_buffer(self.video_command_buffers[swapchain_sync_idx])
@@ -281,15 +279,12 @@ impl H264Decoder for Aura {
             self.device
                 .queue_submit2(self.video_queue, &[submit_info], vk::Fence::null())
                 .unwrap();
-            log::debug!("Video submition ended.");
             self.device
                 .begin_command_buffer(
                     self.graphics_command_buffers[swapchain_sync_idx],
                     &vk::CommandBufferBeginInfo::default(),
                 )
                 .unwrap();
-
-            log::debug!("Acquire Image DST on Graphic.");
 
             Aura::acquire_image_dst_on_graphic(
                 &self.device,
@@ -299,7 +294,6 @@ impl H264Decoder for Aura {
                 self._video_queue_family_index,
                 self._graphics_queue_family_index,
             );
-            log::debug!("Passed.");
 
             self.device.cmd_bind_pipeline(
                 self.graphics_command_buffers[swapchain_sync_idx],
@@ -322,7 +316,6 @@ impl H264Decoder for Aura {
                 dst_view,
             );
 
-            log::debug!("Acquire swapchain image on graphics.");
             Aura::acquire_swapchain_barrier(
                 &self.device,
                 self.graphics_command_buffers[swapchain_sync_idx],
@@ -330,7 +323,6 @@ impl H264Decoder for Aura {
                 swapchain_subresource_range,
                 self._graphics_queue_family_index,
             );
-            log::debug!("Passed.");
             self.device.cmd_begin_rendering(
                 self.graphics_command_buffers[swapchain_sync_idx],
                 &rendering_info,
@@ -365,7 +357,6 @@ impl H264Decoder for Aura {
                 .semaphore(self.render_complete_semaphores[image_index as usize])
                 .stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)];
 
-            log::debug!("Release Graphic on DST");
             Aura::release_graphic_on_dst(
                 &self.device,
                 self.graphics_command_buffers[swapchain_sync_idx],
@@ -374,7 +365,6 @@ impl H264Decoder for Aura {
                 self._video_queue_family_index,
                 self._graphics_queue_family_index,
             );
-            log::debug!("Passed.");
 
             Aura::release_swapchain_barrier(
                 &self.device,
@@ -400,7 +390,6 @@ impl H264Decoder for Aura {
                     self.render_fences[swapchain_sync_idx],
                 )
                 .unwrap();
-            log::debug!("Graphics submition ended.");
 
             let swapchains = [self.swapchain];
             let image_indices = [image_index];
@@ -440,10 +429,13 @@ impl H264Decoder for Aura {
         std_sps.pic_width_in_mbs_minus1 = (1920 / 16) - 1;
         std_sps.pic_height_in_map_units_minus1 = (1080 / 16) - 1;
         std_sps.max_num_ref_frames = 16;
-
-        let std_pps: vk::native::StdVideoH264PictureParameterSet =
+        let mut pps_flags: vk::native::StdVideoH264PpsFlags =
             unsafe { MaybeUninit::zeroed().assume_init() };
-
+        pps_flags.set_entropy_coding_mode_flag(1);
+        let mut std_pps: vk::native::StdVideoH264PictureParameterSet =
+            unsafe { MaybeUninit::zeroed().assume_init() };
+        std_pps.flags = pps_flags;
+        std_pps.seq_parameter_set_id = 0;
         let add_info = vk::VideoDecodeH264SessionParametersAddInfoKHR::default()
             .std_sp_ss(std::slice::from_ref(&std_sps))
             .std_pp_ss(std::slice::from_ref(&std_pps));

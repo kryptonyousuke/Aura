@@ -1,6 +1,6 @@
 use crate::vulkan::vk_init::Aura;
 use ash::khr::video_queue;
-use ash::vk::{TaggedStructure};
+use ash::vk::TaggedStructure;
 use ash::{Device, Instance, vk};
 
 pub trait Decoder {
@@ -361,7 +361,6 @@ impl Decoder for Aura {
         let dependency = vk::DependencyInfo::default().image_memory_barriers(&barriers);
         unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };
     }
-
 
     unsafe fn acquire_swapchain_barrier(
         device: &ash::Device,

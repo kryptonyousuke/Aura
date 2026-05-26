@@ -95,9 +95,13 @@ impl ApplicationHandler for App {
                                 };
 
                                 match conversion {
-                                    Ok(annexb) => {
+                                    Ok((annexb, slice_offsets)) => {
                                         aura.upload_bitstream_packet(&annexb);
-                                        aura.decode_frame(&annexb, v_ctx.is_first_frame);
+                                        aura.decode_frame(
+                                            &annexb,
+                                            &slice_offsets,
+                                            v_ctx.is_first_frame,
+                                        );
                                         if v_ctx.is_first_frame {
                                             v_ctx.is_first_frame = false;
                                         }
