@@ -60,6 +60,21 @@ pub trait Decoder {
         video_queue_family: u32,
         graphics_queue_family: u32,
     );
+    unsafe fn acquire_swapchain_barrier(
+        device: &ash::Device,
+        cmd_buf_graphics: vk::CommandBuffer,
+        dst_image: vk::Image,
+        subresource_range: vk::ImageSubresourceRange,
+        graphics_queue_family: u32,
+    );
+
+    unsafe fn release_swapchain_barrier(
+        device: &ash::Device,
+        cmd_buf_graphics: vk::CommandBuffer,
+        dst_image: vk::Image,
+        subresource_range: vk::ImageSubresourceRange,
+        graphics_queue_family: u32,
+    );
 
     fn copy_image(
         device: &ash::Device,
@@ -342,6 +357,53 @@ impl Decoder for Aura {
             .image(dst_image)
             .old_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
             .new_layout(vk::ImageLayout::VIDEO_DECODE_DST_KHR);
+        let barriers = [image_barrier];
+        let dependency = vk::DependencyInfo::default().image_memory_barriers(&barriers);
+        unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };
+    }
+
+
+    unsafe fn acquire_swapchain_barrier(
+        device: &ash::Device,
+        cmd_buf_graphics: vk::CommandBuffer,
+        dst_image: vk::Image,
+        subresource_range: vk::ImageSubresourceRange,
+        graphics_queue_family: u32,
+    ) {
+        let image_barrier = vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::NONE)
+            .src_access_mask(vk::AccessFlags2::NONE)
+            .src_queue_family_index(graphics_queue_family)
+            .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+            .dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+            .dst_queue_family_index(graphics_queue_family)
+            .subresource_range(subresource_range)
+            .image(dst_image)
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
+        let barriers = [image_barrier];
+        let dependency = vk::DependencyInfo::default().image_memory_barriers(&barriers);
+        unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };
+    }
+
+    unsafe fn release_swapchain_barrier(
+        device: &ash::Device,
+        cmd_buf_graphics: vk::CommandBuffer,
+        dst_image: vk::Image,
+        subresource_range: vk::ImageSubresourceRange,
+        graphics_queue_family: u32,
+    ) {
+        let image_barrier = vk::ImageMemoryBarrier2::default()
+            .src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+            .src_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+            .src_queue_family_index(graphics_queue_family)
+            .dst_stage_mask(vk::PipelineStageFlags2::NONE)
+            .dst_access_mask(vk::AccessFlags2::NONE)
+            .dst_queue_family_index(graphics_queue_family)
+            .subresource_range(subresource_range)
+            .image(dst_image)
+            .old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .new_layout(vk::ImageLayout::PRESENT_SRC_KHR);
         let barriers = [image_barrier];
         let dependency = vk::DependencyInfo::default().image_memory_barriers(&barriers);
         unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };

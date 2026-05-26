@@ -327,7 +327,7 @@ impl H264Decoder for Aura {
                 self._graphics_queue_family_index,
             );
             log::debug!("Passed.");
-
+            Aura::acquire_swapchain_barrier(&self.device, self.graphics_command_buffer, self.swapchain_images[swapchain_sync_idx], subresource_range, self._graphics_queue_family_index);
             self.device
                 .cmd_begin_rendering(self.graphics_command_buffer, &rendering_info);
             let viewport = [self.viewport];
@@ -348,7 +348,8 @@ impl H264Decoder for Aura {
             let cmd_buf_graphics_wait_infos = [vk::SemaphoreSubmitInfo::default()
                 .semaphore(self.render_complete_semaphores[image_index as usize])
                 .stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)];
-
+            Aura::release_swapchain_barrier(&self.device, self.graphics_command_buffer, self.swapchain_images[swapchain_sync_idx], subresource_range, self._graphics_queue_family_index);
+            
             self.device
                 .end_command_buffer(self.graphics_command_buffer)
                 .unwrap();
