@@ -3,18 +3,18 @@ use ash::vk::{self, TaggedStructure};
 use owo_colors::OwoColorize;
 use std::ffi::CStr;
 
-pub unsafe extern "system" fn vulkan_debug_callback(
+pub extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     message_type: vk::DebugUtilsMessageTypeFlagsEXT,
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
     _p_user_data: *mut std::ffi::c_void,
 ) -> vk::Bool32 {
-    let callback_data = *p_callback_data;
+    let callback_data = unsafe { *p_callback_data };
     if callback_data.p_message.is_null() {
         return vk::FALSE;
     }
 
-    let raw_message = CStr::from_ptr(callback_data.p_message).to_string_lossy();
+    let raw_message = unsafe { CStr::from_ptr(callback_data.p_message).to_string_lossy() };
 
     let (severity_label, message_color) = match message_severity {
         vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => {

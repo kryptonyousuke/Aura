@@ -2,7 +2,7 @@ use crate::vulkan::decoder::Decoder;
 use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::vk_init::Aura;
 use ash::khr::video_queue;
-use ash::vk::{BindDescriptorSetsInfo, TaggedStructure};
+use ash::vk::{TaggedStructure};
 use ash::{Device, vk};
 use rayon::prelude::*;
 use std::mem::MaybeUninit;
@@ -19,7 +19,7 @@ impl H264Decoder for Aura {
     fn decode_frame(&mut self, bitstream_data: &[u8], is_first_frame: bool) {
         let frame_idx = (self.current_frame_index % self.dpb_pool_size) as usize;
         let (dst_image, _, dst_view) = self.dst_pool[frame_idx];
-        let (dpb_image, _, dpb_view) = self.dpb_pool[frame_idx];
+        let (_dpb_image, _, dpb_view) = self.dpb_pool[frame_idx];
         log::debug!("current_frame_index: {}", self.current_frame_index);
         log::debug!("dpb_pool_size: {}", self.dpb_pool_size);
         log::debug!("frame_idx: {}", frame_idx);

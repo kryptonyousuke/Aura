@@ -1,6 +1,6 @@
 use crate::vulkan::vk_init::Aura;
 use ash::khr::video_queue;
-use ash::vk::{DependencyInfo, TaggedStructure};
+use ash::vk::{TaggedStructure};
 use ash::{Device, Instance, vk};
 
 pub trait Decoder {
