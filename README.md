@@ -14,7 +14,7 @@
 
 | Codec | Status | Hardware Acceleration |
 | :--- | :---: | :---: |
-| H.264 | 🚧 | Under development |
+| H.264 | ✅ | Under development |
 | H.265 | 🚧 | Coming soon |
 | AV1 | 🚧 | Coming soon |
 
