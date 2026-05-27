@@ -102,7 +102,7 @@ pub struct Aura {
 impl Aura {
     // Constants
 
-    pub fn new(window: &winit::window::Window) -> Self {
+    pub fn new(window: &winit::window::Window, extradata: &Vec<u8>) -> Self {
         let dpb_pool_size = 16;
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
         match unsafe { entry.try_enumerate_instance_version().unwrap() } {
@@ -292,6 +292,7 @@ impl Aura {
             &instance,
             physical_device,
             &device,
+            extradata,
             decode_queue_family_index,
         );
 
@@ -639,6 +640,7 @@ impl Aura {
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
         device: &ash::Device,
+        extradata: &Vec<u8>,
         queue_family_index: u32,
     ) -> DecodingSession {
         let video_loader = video_queue::Device::load(instance, device);
@@ -647,7 +649,7 @@ impl Aura {
         let session = Aura::create_video_session(instance, device, queue_family_index);
 
         let session_parameters =
-            unsafe { Aura::create_h264_session_parameters(device, &video_loader, session) };
+            unsafe { Aura::create_h264_session_parameters(device, &video_loader, extradata, session) };
 
         let session_memories = Aura::bind_video_session_memory(
             instance,

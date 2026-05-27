@@ -77,3 +77,34 @@ pub fn avcc_to_annexb(data: &[u8], extradata: &[u8]) -> Result<(Vec<u8>, Vec<u32
 
     Ok((out, slice_offsets))
 }
+pub fn extract_sps_bytes(extradata: &[u8]) -> Option<&[u8]> {
+    if extradata.len() < 8 {
+        return None;
+    }
+    let num_sps = extradata[5] & 0x1F;
+    if num_sps == 0 {
+        return None;
+    }
+    let sps_len = u16::from_be_bytes([extradata[6], extradata[7]]) as usize;
+    if extradata.len() < 8 + sps_len {
+        return None;
+    }
+    Some(&extradata[8..8 + sps_len])
+}
+
+pub fn extract_pps_bytes(extradata: &[u8]) -> Option<&[u8]> {
+    if extradata.len() < 8 { return None; }
+    let sps_len = u16::from_be_bytes([extradata[6], extradata[7]]) as usize;
+    let pps_start_offset = 8 + sps_len;
+    if extradata.len() < pps_start_offset + 3 { return None; }
+    let num_pps = extradata[pps_start_offset];
+    if num_pps == 0 { return None; }
+    let pps_len = u16::from_be_bytes([
+        extradata[pps_start_offset + 1],
+        extradata[pps_start_offset + 2]
+    ]) as usize;
+    let pps_payload_start = pps_start_offset + 3;
+    if extradata.len() < pps_payload_start + pps_len { return None; }
+    Some(&extradata[pps_payload_start..pps_payload_start + pps_len])
+}
+

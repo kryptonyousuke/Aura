@@ -30,7 +30,6 @@ impl ApplicationHandler for App {
                 .with_inner_size(winit::dpi::LogicalSize::new(1920.0, 1080.0));
 
             let window = event_loop.create_window(window_attributes).unwrap();
-            let aura = Aura::new(&window);
 
             let video_path = "test_h264.mp4";
             let ictx = ffmpeg::format::input(&video_path).unwrap();
@@ -50,12 +49,12 @@ impl ApplicationHandler for App {
                     .to_vec()
                 }
             };
+            let aura = Aura::new(&window, &extradata);
 
             log::info!(
                 "Vídeo file successfuly loaded. Extradata size: {}",
                 extradata.len()
             );
-
             self.window = Some(window);
             self.aura = Some(aura);
             self.video_ctx = Some(VideoContext {

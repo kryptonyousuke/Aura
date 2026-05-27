@@ -12,12 +12,13 @@ pub trait H264Decoder {
     unsafe fn create_h264_session_parameters(
         device: &Device,
         video_loader: &video_queue::Device,
+        extradata: &[u8],
         session: vk::VideoSessionKHR,
     ) -> vk::VideoSessionParametersKHR;
 }
 impl H264Decoder for Aura {
     fn decode_frame(&mut self, bitstream_data: &[u8], slice_offsets: &[u32], is_first_frame: bool) {
-        //std::thread::sleep(std::time::Duration::from_secs(2));
+        // std::thread::sleep(std::time::Duration::from_millis(200));
         let frame_idx = (self.current_frame_index % self.dpb_pool_size) as usize;
         let (dst_image, _, dst_view) = self.dst_pool[frame_idx];
         let (_dpb_image, _, dpb_view) = self.dpb_pool[frame_idx];
@@ -72,7 +73,7 @@ impl H264Decoder for Aura {
                 .begin_command_buffer(self.video_command_buffers[swapchain_sync_idx], &begin_info)
                 .unwrap();
             let subresource_range = vk::ImageSubresourceRange::default()
-                .aspect_mask(vk::ImageAspectFlags::PLANE_0 | vk::ImageAspectFlags::PLANE_1)
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
                 .base_mip_level(0)
                 .level_count(1)
                 .base_array_layer(frame_idx as u32)
@@ -137,12 +138,10 @@ impl H264Decoder for Aura {
                 .image_view_binding(dpb_view)
                 .coded_extent(self.extent)
                 .base_array_layer(0);
-
             let setup_slot_decode = vk::VideoReferenceSlotInfoKHR::default()
                 .slot_index(frame_idx as i32)
                 .picture_resource(&setup_resource)
                 .push(&mut h264_setup_slot_info_decode);
-
             let setup_slot_begin = vk::VideoReferenceSlotInfoKHR::default()
                 .slot_index(-1)
                 .picture_resource(&setup_resource)
@@ -185,7 +184,7 @@ impl H264Decoder for Aura {
                 }
 
                 refs_h264 = refs_std
-                    .par_iter()
+                    .iter()
                     .map(|std_ref| {
                         vk::VideoDecodeH264DpbSlotInfoKHR::default().std_reference_info(std_ref)
                     })
@@ -412,30 +411,17 @@ impl H264Decoder for Aura {
     unsafe fn create_h264_session_parameters(
         _device: &Device,
         video_loader: &video_queue::Device,
+        extradata: &[u8],
         session: vk::VideoSessionKHR,
     ) -> vk::VideoSessionParametersKHR {
-        let mut sps_flags: vk::native::StdVideoH264SpsFlags =
-            unsafe { MaybeUninit::zeroed().assume_init() };
-        sps_flags.set_frame_mbs_only_flag(1);
-        sps_flags.set_direct_8x8_inference_flag(1);
 
-        let mut std_sps: vk::native::StdVideoH264SequenceParameterSet =
-            unsafe { MaybeUninit::zeroed().assume_init() };
-        std_sps.flags = sps_flags;
-        std_sps.profile_idc = vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_MAIN;
-        std_sps.level_idc = vk::native::StdVideoH264LevelIdc_STD_VIDEO_H264_LEVEL_IDC_4_0;
-        std_sps.chroma_format_idc =
-            vk::native::StdVideoH264ChromaFormatIdc_STD_VIDEO_H264_CHROMA_FORMAT_IDC_420;
-        std_sps.pic_width_in_mbs_minus1 = (1920 / 16) - 1;
-        std_sps.pic_height_in_map_units_minus1 = (1080 / 16) - 1;
-        std_sps.max_num_ref_frames = 16;
-        let mut pps_flags: vk::native::StdVideoH264PpsFlags =
-            unsafe { MaybeUninit::zeroed().assume_init() };
-        pps_flags.set_entropy_coding_mode_flag(1);
-        let mut std_pps: vk::native::StdVideoH264PictureParameterSet =
-            unsafe { MaybeUninit::zeroed().assume_init() };
-        std_pps.flags = pps_flags;
-        std_pps.seq_parameter_set_id = 0;
+        let std_sps = crate::vulkan::decoders::h264_parser::parse_sps(extradata)
+                .expect("Failed to parse SPS");
+                
+        let std_pps = crate::vulkan::decoders::h264_parser::parse_pps(extradata)
+            .expect("Failed to parse PPS");
+        log::info!("Resolution: {}x{}", (std_sps.pic_width_in_mbs_minus1 + 1) * 16, (std_sps.pic_height_in_map_units_minus1 + 1) * 16);
+        log::info!("CABAC: {}", std_pps.flags.entropy_coding_mode_flag());
         let add_info = vk::VideoDecodeH264SessionParametersAddInfoKHR::default()
             .std_sp_ss(std::slice::from_ref(&std_sps))
             .std_pp_ss(std::slice::from_ref(&std_pps));
