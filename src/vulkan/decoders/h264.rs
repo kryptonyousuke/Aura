@@ -24,10 +24,11 @@ impl H264Decoder for Aura {
         log::debug!("current_frame_index: {}", self.current_frame_index);
         log::debug!("dpb_pool_size: {}", self.dpb_pool_size);
         log::debug!("frame_idx: {}", frame_idx);
-        let aligned_size = (bitstream_data.len() as u64 + 127) & !127;
+        //let aligned_size = (bitstream_data.len() as u64 + 127) & !127;
+        let swapchain_sync_idx =
+            (self.current_frame_index % self.frames_in_flight as usize) as usize;
+        let aligned_size = self.bitstream_sizes[swapchain_sync_idx];
         unsafe {
-            let swapchain_sync_idx =
-                (self.current_frame_index % self.frames_in_flight as usize) as usize;
             self.upload_bitstream_packet(bitstream_data, swapchain_sync_idx);
 
             log::debug!("swapchain_sync_idx: {}", swapchain_sync_idx);
@@ -246,7 +247,7 @@ impl H264Decoder for Aura {
             let decode_info = vk::VideoDecodeInfoKHR::default()
                 .src_buffer(self.bitstream_buffers[swapchain_sync_idx])
                 .src_buffer_offset(0)
-                .src_buffer_range(aligned_size)
+                .src_buffer_range(aligned_size as u64)
                 .dst_picture_resource(dst_resource)
                 .setup_reference_slot(&setup_slot_decode)
                 .reference_slots(&reference_slots)
@@ -364,7 +365,7 @@ impl H264Decoder for Aura {
                 .command_buffer(self.graphics_command_buffers[swapchain_sync_idx])];
             let cmd_buf_graphics_wait_infos = [vk::SemaphoreSubmitInfo::default()
                 .semaphore(self.render_complete_semaphores[image_index as usize])
-                .stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)];
+                .stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)];
 
             Aura::release_graphic_on_dst(
                 &self.device,
@@ -438,6 +439,7 @@ impl H264Decoder for Aura {
             "log2_max_pic_order_cnt_lsb_minus4: {}",
             std_sps.log2_max_pic_order_cnt_lsb_minus4
         );
+        log::info!("max_num_ref_frames: {}", std_sps.max_num_ref_frames);
         log::info!("CABAC: {}", std_pps.flags.entropy_coding_mode_flag());
         let add_info = vk::VideoDecodeH264SessionParametersAddInfoKHR::default()
             .std_sp_ss(std::slice::from_ref(&std_sps))

@@ -60,6 +60,7 @@ pub struct Aura {
     pub(super) session: vk::VideoSessionKHR,
     pub(super) bitstream_buffers: [vk::Buffer; FRAMES_IN_FLIGHT as usize],
     pub(super) bitstream_memories: [vk::DeviceMemory; FRAMES_IN_FLIGHT as usize],
+    pub(super) bitstream_sizes: [u32; FRAMES_IN_FLIGHT as usize],
     pub(super) video_loader: video_queue::Device,
     pub(super) decode_loader: VideoDecodeLoader,
     pub(super) graphics_queue: vk::Queue,
@@ -297,16 +298,19 @@ impl Aura {
         );
         let mut bitstream_buffers = [vk::Buffer::null(); FRAMES_IN_FLIGHT as usize];
         let mut bitstream_memories = [vk::DeviceMemory::null(); FRAMES_IN_FLIGHT as usize];
+        let mut bitstream_sizes = [0 as u32; FRAMES_IN_FLIGHT as usize];
         for i in 0..FRAMES_IN_FLIGHT {
-            let (bitstream_buffer, bitstream_memory, _) = Aura::create_bitstream_buffer(
-                &instance,
-                &video_instance_ext,
-                physical_device,
-                &device,
-                &video_profile,
-            );
+            let (bitstream_buffer, bitstream_memory, bitstream_size) =
+                Aura::create_bitstream_buffer(
+                    &instance,
+                    &video_instance_ext,
+                    physical_device,
+                    &device,
+                    &video_profile,
+                );
             bitstream_buffers[i as usize] = bitstream_buffer;
             bitstream_memories[i as usize] = bitstream_memory;
+            bitstream_sizes[i as usize] = bitstream_size
         }
         let (
             swapchain_loader,
@@ -460,6 +464,7 @@ impl Aura {
             _debug_messenger: _debug_messenger,
             bitstream_buffers: bitstream_buffers,
             bitstream_memories: bitstream_memories,
+            bitstream_sizes: bitstream_sizes,
             video_loader: video_loader,
             decode_loader: decode_loader,
             ycbcr_conversion: ycbcr_conversion,

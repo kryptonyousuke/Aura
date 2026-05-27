@@ -1,6 +1,6 @@
 use crate::vulkan::vk_init::Aura;
 use ash::khr::video_queue;
-use ash::vk::TaggedStructure;
+use ash::vk::{TaggedStructure, VideoDecodeH264PictureLayoutFlagsKHR};
 use ash::{Device, Instance, vk};
 
 pub trait Decoder {
@@ -199,7 +199,6 @@ impl Decoder for Aura {
             let alignment = video_caps.min_bitstream_buffer_offset_alignment;
             let alignment = if alignment == 0 { 256 } else { alignment };
             let size = (4 * 1024 * 1024 + alignment - 1) & !(alignment - 1);
-
             let buffer = device
                 .create_buffer(
                     &vk::BufferCreateInfo::default()
@@ -210,6 +209,7 @@ impl Decoder for Aura {
                 )
                 .unwrap();
             let reqs = device.get_buffer_memory_requirements(buffer);
+            let final_alloc_size = (reqs.size + reqs.alignment - 1) & !(reqs.alignment - 1);
             let index = Self::find_memory_type(
                 instance,
                 pd,
@@ -219,13 +219,13 @@ impl Decoder for Aura {
             let memory = device
                 .allocate_memory(
                     &vk::MemoryAllocateInfo::default()
-                        .allocation_size(reqs.size)
+                        .allocation_size(final_alloc_size)
                         .memory_type_index(index),
                     None,
                 )
                 .unwrap();
             device.bind_buffer_memory(buffer, memory, 0).unwrap();
-            (buffer, memory, size as u32)
+            (buffer, memory, final_alloc_size as u32)
         }
     }
 
@@ -236,7 +236,7 @@ impl Decoder for Aura {
                 .map_memory(
                     self.bitstream_memories[swapchain_sync_idx],
                     0,
-                    data.len() as u64,
+                    self.bitstream_sizes[swapchain_sync_idx] as u64,
                     vk::MemoryMapFlags::empty(),
                 )
                 .unwrap();
@@ -283,7 +283,7 @@ impl Decoder for Aura {
             .src_access_mask(vk::AccessFlags2::NONE)
             .src_queue_family_index(video_queue_family)
             .dst_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
-            .dst_access_mask(vk::AccessFlags2::SHADER_SAMPLED_READ)
+            .dst_access_mask(vk::AccessFlags2::SHADER_READ)
             .dst_queue_family_index(graphics_queue_family)
             .subresource_range(subresource_range)
             .image(dst_image)
