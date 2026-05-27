@@ -23,7 +23,7 @@ pub trait Decoder {
         device: &Device,
         prof: &vk::VideoProfileInfoKHR,
     ) -> (vk::Buffer, vk::DeviceMemory, u32);
-    fn upload_bitstream_packet(&self, data: &[u8]);
+    fn upload_bitstream_packet(&self, data: &[u8], swapchain_sync_idx: usize);
     unsafe fn create_ycbcr_conversion(
         device: &ash::Device,
         format: vk::Format,
@@ -229,19 +229,20 @@ impl Decoder for Aura {
         }
     }
 
-    fn upload_bitstream_packet(&self, data: &[u8]) {
+    fn upload_bitstream_packet(&self, data: &[u8], swapchain_sync_idx: usize) {
         unsafe {
             let ptr = self
                 .device
                 .map_memory(
-                    self.bitstream_memory,
+                    self.bitstream_memories[swapchain_sync_idx],
                     0,
                     data.len() as u64,
                     vk::MemoryMapFlags::empty(),
                 )
                 .unwrap();
             std::ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len());
-            self.device.unmap_memory(self.bitstream_memory);
+            self.device
+                .unmap_memory(self.bitstream_memories[swapchain_sync_idx]);
         }
     }
 

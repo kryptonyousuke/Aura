@@ -58,8 +58,8 @@ pub struct Aura {
     pub(super) _graphics_queue_family_index: u32,
     pub(super) _session_memories: Vec<vk::DeviceMemory>,
     pub(super) session: vk::VideoSessionKHR,
-    pub(super) bitstream_buffer: vk::Buffer,
-    pub(super) bitstream_memory: vk::DeviceMemory,
+    pub(super) bitstream_buffers: [vk::Buffer; FRAMES_IN_FLIGHT as usize],
+    pub(super) bitstream_memories: [vk::DeviceMemory; FRAMES_IN_FLIGHT as usize],
     pub(super) video_loader: video_queue::Device,
     pub(super) decode_loader: VideoDecodeLoader,
     pub(super) graphics_queue: vk::Queue,
@@ -295,14 +295,19 @@ impl Aura {
             extradata,
             decode_queue_family_index,
         );
-
-        let (bitstream_buffer, bitstream_memory, _) = Aura::create_bitstream_buffer(
-            &instance,
-            &video_instance_ext,
-            physical_device,
-            &device,
-            &video_profile,
-        );
+        let mut bitstream_buffers = [vk::Buffer::null(); FRAMES_IN_FLIGHT as usize];
+        let mut bitstream_memories = [vk::DeviceMemory::null(); FRAMES_IN_FLIGHT as usize];
+        for i in 0..FRAMES_IN_FLIGHT {
+            let (bitstream_buffer, bitstream_memory, _) = Aura::create_bitstream_buffer(
+                &instance,
+                &video_instance_ext,
+                physical_device,
+                &device,
+                &video_profile,
+            );
+            bitstream_buffers[i as usize] = bitstream_buffer;
+            bitstream_memories[i as usize] = bitstream_memory;
+        }
         let (
             swapchain_loader,
             swapchain,
@@ -453,8 +458,8 @@ impl Aura {
             _session_memories: _session_memories,
             _debug_utils_loader: _debug_utils_loader,
             _debug_messenger: _debug_messenger,
-            bitstream_buffer: bitstream_buffer,
-            bitstream_memory: bitstream_memory,
+            bitstream_buffers: bitstream_buffers,
+            bitstream_memories: bitstream_memories,
             video_loader: video_loader,
             decode_loader: decode_loader,
             ycbcr_conversion: ycbcr_conversion,
@@ -648,8 +653,9 @@ impl Aura {
 
         let session = Aura::create_video_session(instance, device, queue_family_index);
 
-        let session_parameters =
-            unsafe { Aura::create_h264_session_parameters(device, &video_loader, extradata, session) };
+        let session_parameters = unsafe {
+            Aura::create_h264_session_parameters(device, &video_loader, extradata, session)
+        };
 
         let session_memories = Aura::bind_video_session_memory(
             instance,
@@ -788,8 +794,12 @@ impl Drop for Aura {
             for mem in &self._session_memories {
                 self.device.free_memory(*mem, None);
             }
-            self.device.destroy_buffer(self.bitstream_buffer, None);
-            self.device.free_memory(self.bitstream_memory, None);
+            for i in 0..FRAMES_IN_FLIGHT {
+                self.device
+                    .destroy_buffer(self.bitstream_buffers[i as usize], None);
+                self.device
+                    .free_memory(self.bitstream_memories[i as usize], None);
+            }
             log::debug!("Video decoding resources were successfully freed and destroyed.");
 
             for i in 0..self.frames_in_flight {

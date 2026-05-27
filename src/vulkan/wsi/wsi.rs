@@ -95,7 +95,6 @@ impl ApplicationHandler for App {
 
                                 match conversion {
                                     Ok((annexb, slice_offsets)) => {
-                                        aura.upload_bitstream_packet(&annexb);
                                         aura.decode_frame(
                                             &annexb,
                                             &slice_offsets,

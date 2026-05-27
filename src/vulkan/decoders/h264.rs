@@ -28,6 +28,8 @@ impl H264Decoder for Aura {
         unsafe {
             let swapchain_sync_idx =
                 (self.current_frame_index % self.frames_in_flight as usize) as usize;
+            self.upload_bitstream_packet(bitstream_data, swapchain_sync_idx);
+
             log::debug!("swapchain_sync_idx: {}", swapchain_sync_idx);
             let _ = self
                 .device
@@ -83,18 +85,16 @@ impl H264Decoder for Aura {
                 .level_count(1)
                 .base_array_layer(0)
                 .layer_count(1);
-            let buffer_barriers = [
-                vk::BufferMemoryBarrier2::default()
-                    .src_stage_mask(vk::PipelineStageFlags2::HOST)
-                    .src_access_mask(vk::AccessFlags2::HOST_WRITE)
-                    .dst_stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)
-                    .dst_access_mask(vk::AccessFlags2::VIDEO_DECODE_READ_KHR)
-                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .buffer(self.bitstream_buffer)
-                    .offset(0)
-                    .size(vk::WHOLE_SIZE)
-            ];
+            let buffer_barriers = [vk::BufferMemoryBarrier2::default()
+                .src_stage_mask(vk::PipelineStageFlags2::HOST)
+                .src_access_mask(vk::AccessFlags2::HOST_WRITE)
+                .dst_stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)
+                .dst_access_mask(vk::AccessFlags2::VIDEO_DECODE_READ_KHR)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .buffer(self.bitstream_buffers[swapchain_sync_idx])
+                .offset(0)
+                .size(vk::WHOLE_SIZE)];
             let image_barriers = [
                 vk::ImageMemoryBarrier2::default()
                     .src_stage_mask(vk::PipelineStageFlags2::NONE)
@@ -115,8 +115,9 @@ impl H264Decoder for Aura {
                     .image(self.dpb_pool[frame_idx].0)
                     .subresource_range(subresource_range),
             ];
-            let dependency_info =
-                vk::DependencyInfo::default().image_memory_barriers(&image_barriers).buffer_memory_barriers(&buffer_barriers);
+            let dependency_info = vk::DependencyInfo::default()
+                .image_memory_barriers(&image_barriers)
+                .buffer_memory_barriers(&buffer_barriers);
 
             self.device.cmd_pipeline_barrier2(
                 self.video_command_buffers[swapchain_sync_idx],
@@ -243,7 +244,7 @@ impl H264Decoder for Aura {
                 .base_array_layer(0);
 
             let decode_info = vk::VideoDecodeInfoKHR::default()
-                .src_buffer(self.bitstream_buffer)
+                .src_buffer(self.bitstream_buffers[swapchain_sync_idx])
                 .src_buffer_offset(0)
                 .src_buffer_range(aligned_size)
                 .dst_picture_resource(dst_resource)
@@ -415,12 +416,6 @@ impl H264Decoder for Aura {
             log::debug!("Frame was sent to vulkan!");
             self.current_frame_index += 1;
         }
-        unsafe{ self.device.queue_wait_idle(self.video_queue).unwrap() }
-        /*
-         * The current bitstream buffer is under a lot of hazards because it's being used in 3 frames in flight at the same time.
-         * We will just put a queue_wait_idle and throw the performance to the space until we get everything working fine.
-         */
-        
     }
 
     unsafe fn create_h264_session_parameters(
@@ -429,14 +424,20 @@ impl H264Decoder for Aura {
         extradata: &[u8],
         session: vk::VideoSessionKHR,
     ) -> vk::VideoSessionParametersKHR {
-
         let std_sps = crate::vulkan::decoders::h264_parser::parse_sps(extradata)
-                .expect("Failed to parse SPS");
-                
+            .expect("Failed to parse SPS");
+
         let std_pps = crate::vulkan::decoders::h264_parser::parse_pps(extradata)
             .expect("Failed to parse PPS");
-        log::info!("Resolution: {}x{}", (std_sps.pic_width_in_mbs_minus1 + 1) * 16, (std_sps.pic_height_in_map_units_minus1 + 1) * 16);
-        log::info!("log2_max_pic_order_cnt_lsb_minus4: {}", std_sps.log2_max_pic_order_cnt_lsb_minus4);
+        log::info!(
+            "Resolution: {}x{}",
+            (std_sps.pic_width_in_mbs_minus1 + 1) * 16,
+            (std_sps.pic_height_in_map_units_minus1 + 1) * 16
+        );
+        log::info!(
+            "log2_max_pic_order_cnt_lsb_minus4: {}",
+            std_sps.log2_max_pic_order_cnt_lsb_minus4
+        );
         log::info!("CABAC: {}", std_pps.flags.entropy_coding_mode_flag());
         let add_info = vk::VideoDecodeH264SessionParametersAddInfoKHR::default()
             .std_sp_ss(std::slice::from_ref(&std_sps))
