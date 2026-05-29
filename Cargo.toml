@@ -15,6 +15,7 @@ overflow-checks = false
 [dependencies]
 winit = "0.30.13"
 ash-window = { git = "https://github.com/ash-rs/ash", package = "ash-window" }
+clap = { version = "4", features = ["derive"] }
 ash = { git = "https://github.com/ash-rs/ash" }
 gpu-allocator = { version = "0.28.0", features = ["vulkan"] }
 raw-window-handle = "0.6.2"

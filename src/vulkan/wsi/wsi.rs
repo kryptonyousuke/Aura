@@ -11,9 +11,21 @@ use winit::window::{Window, WindowId};
 
 #[derive(Default)]
 pub struct App {
+    file_name: String,
     window: Option<Window>,
     pub aura: Option<Aura>,
     video_ctx: Option<VideoContext>,
+}
+
+impl App {
+    pub fn new(file_name: String) -> Self {
+        Self {
+            file_name,
+            window: None,
+            aura: None,
+            video_ctx: None,
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -24,8 +36,7 @@ impl ApplicationHandler for App {
                 .with_inner_size(winit::dpi::LogicalSize::new(1920.0, 1080.0));
 
             let window = event_loop.create_window(window_attributes).unwrap();
-            //let video_path = "test_h264.mp4";
-            let video_path = "test_h264_2.mp4";
+            let video_path = self.file_name.clone();
             let ictx = ffmpeg::format::input(&video_path).unwrap();
             let input_stream = ictx.streams().best(ffmpeg::media::Type::Video).unwrap();
             let video_stream_index = input_stream.index();
