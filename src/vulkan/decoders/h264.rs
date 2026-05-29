@@ -204,7 +204,7 @@ impl H264Decoder for Aura {
                 vk::VideoDecodeH264DpbSlotInfoKHR::default().std_reference_info(&std_setup_info);
             let setup_resource = vk::VideoPictureResourceInfoKHR::default()
                 .image_view_binding(dpb_view)
-                .coded_extent(vk::Extent2D::default().width(1920).height(1088))
+                .coded_extent(self.video_extent)
                 .base_array_layer(0);
             let setup_slot_decode = vk::VideoReferenceSlotInfoKHR::default()
                 .slot_index(frame_idx as i32)
@@ -243,7 +243,7 @@ impl H264Decoder for Aura {
             // Decode the bitstream
             let dst_resource = vk::VideoPictureResourceInfoKHR::default()
                 .image_view_binding(dst_view)
-                .coded_extent(vk::Extent2D::default().width(1920).height(1088))
+                .coded_extent(self.video_extent)
                 .base_array_layer(0);
 
             let decode_info = vk::VideoDecodeInfoKHR::default()

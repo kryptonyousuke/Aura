@@ -48,14 +48,17 @@ pub struct Aura {
      */
     pub dpb_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>, // Decoded Pictures Buffer used as reference to decode P-frames and B-frames.
     pub dst_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>, // Stores the current decoded image.
+    pub dpb_and_dst_format: vk::Format,
     pub dpb_pocs: Vec<i32>,
     pub dpb_pool_size: usize,
     pub dpb_slot_valid: Vec<bool>,
+    pub dpb_frame_nums: [u16; DPB_POOL_SIZE],
     pub current_frame_count_idx: usize,
     pub graphics_command_pool: vk::CommandPool,
     pub graphics_command_buffers: Vec<vk::CommandBuffer>,
     pub video_command_pool: vk::CommandPool,
     pub video_command_buffers: Vec<vk::CommandBuffer>,
+    
     
     pub swapchain_loader: ash::khr::swapchain::Device,
     pub swapchain: vk::SwapchainKHR,
@@ -81,7 +84,6 @@ pub struct Aura {
     pub scissor: vk::Rect2D,
     pub video_extent: vk::Extent2D,
     pub frames_in_flight: u8,
-    pub dpb_frame_nums: [u16; DPB_POOL_SIZE],
     supported_decoders: SupportedCodecs,
 }
 
@@ -89,6 +91,7 @@ impl Aura {
     // Constants
 
     pub fn new(window: &winit::window::Window, extradata: &Vec<u8>) -> Self {
+
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
         match unsafe { entry.try_enumerate_instance_version().unwrap() } {
             Some(version) => {
@@ -223,9 +226,16 @@ impl Aura {
                 .expect("Failed to create a logical device.")
         };
 
+        // hardcoded extents and formats for DST and DPB
+        let dpb_and_dst_format = vk::Format::G8_B8R8_2PLANE_420_UNORM;
+        let video_extent = vk::Extent2D {
+            width: 1920,
+            height: 1080u32.div_ceil(16) * 16, // h264 macroblocks are multiple of 16, 1088 is needed.
+        };
+
         // Ycbcr Sampler
         let ycbcr_conversion =
-            unsafe { Self::create_ycbcr_conversion(&device, vk::Format::G8_B8R8_2PLANE_420_UNORM) };
+            unsafe { Self::create_ycbcr_conversion(&device, dpb_and_dst_format) };
         let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
             .std_profile_idc(vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_MAIN);
         let mut video_profile = vk::VideoProfileInfoKHR::default()
@@ -235,10 +245,12 @@ impl Aura {
             .luma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8)
             .chroma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8);
 
+
+
+        // Logs
         log::info!(
             "\nThis is being shown just for your knowledge, this code won't work with a lot of cards for now."
         );
-
         Self::log_formats(
             physical_device,
             &video_profile,
@@ -260,6 +272,9 @@ impl Aura {
             vk::ImageUsageFlags::VIDEO_DECODE_DST_KHR,
             "VIDEO_DECODE_DST_KHR",
         );
+
+
+        
 
         let DecodingSession {
             session,
@@ -351,6 +366,8 @@ impl Aura {
             &mut video_profile,
             ycbcr_conversion,
             DPB_POOL_SIZE,
+            dpb_and_dst_format,
+            video_extent
         );
         let semaphore_create_info = vk::SemaphoreCreateInfo::default();
         let frames_in_flight_fences_info =
@@ -473,6 +490,7 @@ impl Aura {
             
             dpb_pool: dpb_pool,
             dst_pool: dst_pool,
+            dpb_and_dst_format: dpb_and_dst_format,
             current_frame_count_idx: 0,
             dpb_pool_size: DPB_POOL_SIZE,
             dpb_frame_nums: [0 as u16; DPB_POOL_SIZE as usize],
@@ -483,10 +501,7 @@ impl Aura {
 
             viewport: viewport,
             scissor: scissor,
-            video_extent: vk::Extent2D {
-                width: 1920,
-                height: 1080u32.div_ceil(16) * 16,
-            },
+            video_extent: video_extent,
             frames_in_flight: FRAMES_IN_FLIGHT,
             supported_decoders: supported_decoders,
         }
@@ -499,18 +514,19 @@ impl Aura {
         video_profile: &mut vk::VideoProfileInfoKHR,
         ycbcr_conversion: vk::SamplerYcbcrConversion,
         dpb_pool_size: usize,
+        dpb_format: vk::Format,
+        video_extent: vk::Extent2D
     ) -> (
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
     ) {
         let _output_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)> =
             Vec::with_capacity(dpb_pool_size);
-        let dpb_format = vk::Format::G8_B8R8_2PLANE_420_UNORM;
         let mut profile_list =
             vk::VideoProfileListInfoKHR::default().profiles(std::slice::from_ref(&video_profile));
         let dpb_dst_extent = vk::Extent3D {
-            width: 1920,
-            height: 1080,
+            width: video_extent.width,
+            height: video_extent.height,
             depth: 1,
         };
         let dpb_image_info = vk::ImageCreateInfo::default()
@@ -587,7 +603,7 @@ impl Aura {
                 .push(&mut local_ycbcr_info)
                 .image(dpb_image)
                 .view_type(vk::ImageViewType::TYPE_2D)
-                .format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
+                .format(dpb_format)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
@@ -602,7 +618,7 @@ impl Aura {
                 .push(&mut local_ycbcr_info)
                 .image(dst_image)
                 .view_type(vk::ImageViewType::TYPE_2D)
-                .format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
+                .format(dpb_format)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
