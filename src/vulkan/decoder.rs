@@ -1,7 +1,36 @@
 use crate::vulkan::vk_init::Aura;
 use ash::khr::video_queue;
-use ash::vk::{TaggedStructure, VideoDecodeH264PictureLayoutFlagsKHR};
-use ash::{Device, Instance, vk};
+use ash::vk::TaggedStructure;
+use ash::{Device, Instance, vk, khr::{video_decode_queue::Device as VideoDecodeLoader}};
+pub struct DecodeExtensions;
+use std::ffi::CStr;
+
+impl DecodeExtensions {
+    pub const H264: &'static CStr = c"VK_KHR_video_decode_h264";
+    pub const H265: &'static CStr = c"VK_KHR_video_decode_h265";
+    pub const AV1: &'static CStr = c"VK_KHR_video_decode_av1";
+}
+pub struct SupportedCodecs {
+    pub h264: bool,
+    pub h265: bool,
+    pub av1: bool,
+}
+impl Default for SupportedCodecs {
+    fn default() -> Self {
+        Self {
+            h264: false,
+            h265: false,
+            av1: false,
+        }
+    }
+}
+pub struct DecodingSession {
+    pub(super) session: vk::VideoSessionKHR,
+    pub(super) _session_memories: Vec<vk::DeviceMemory>,
+    pub(super) video_loader: video_queue::Device,
+    pub(super) decode_loader: VideoDecodeLoader,
+    pub(super) session_parameters: vk::VideoSessionParametersKHR,
+}
 
 pub trait Decoder {
     fn create_video_session(
@@ -107,8 +136,8 @@ impl Decoder for Aura {
             .picture_format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
             .reference_picture_format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
             .max_coded_extent(vk::Extent2D {
-                width: 1920,
-                height: 1088,
+                width: 4096,
+                height: 4096,
             })
             .max_dpb_slots(16)
             .max_active_reference_pictures(16)

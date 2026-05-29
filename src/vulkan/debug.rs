@@ -117,4 +117,21 @@ impl Aura {
         }
         log::info!("------------------------------------------");
     }
+    pub fn log_instance_extensions(entry: &ash::Entry, required_instance_extensions: &Vec<&CStr>){
+        let available_extensions = unsafe {
+            entry
+                .enumerate_instance_extension_properties(None)
+                .unwrap()
+                .into_iter()
+        };
+        log::info!("------------ Available Instance Extensions -----------");
+        for extension in available_extensions {
+            log::info!("{:?}", extension.extension_name_as_c_str().unwrap());
+        }
+        log::info!("------------ Required Instance Extensions -----------");
+        for extension_c_str in required_instance_extensions {
+            log::info!("Extension: {:#?}", extension_c_str);
+        }
+        log::info!("------------------------------------------------------");
+    }
 }

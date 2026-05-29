@@ -117,7 +117,7 @@ impl ApplicationHandler for App {
                                                 &v_ctx.extradata,
                                             )
                                             .expect("Failed to parse SPS");
-                                        let std_pps =
+                                        let _std_pps =
                                             crate::vulkan::decoders::h264_parser::parse_pps(
                                                 &v_ctx.extradata,
                                             )

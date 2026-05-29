@@ -1,103 +1,87 @@
 use super::debug;
-use crate::vulkan::decoder::Decoder;
+use crate::vulkan::decoder::{Decoder, DecodingSession, SupportedCodecs, DecodeExtensions};
 use crate::vulkan::decoders::h264::H264Decoder;
 use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::sampler::Sampler;
 use crate::vulkan::shaders::Shaders;
-use ash::vk::{DebugUtilsMessengerEXT, TaggedStructure};
 use ash::{
     Entry, Instance,
     khr::{video_decode_queue::Device as VideoDecodeLoader, video_queue},
     vk,
+    vk::{DebugUtilsMessengerEXT, TaggedStructure}
 };
 use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
 use std::ffi::CStr;
-
-pub struct DecodeExtensions;
-
-impl DecodeExtensions {
-    pub const H264: &'static CStr = c"VK_KHR_video_decode_h264";
-    pub const H265: &'static CStr = c"VK_KHR_video_decode_h265";
-    pub const AV1: &'static CStr = c"VK_KHR_video_decode_av1";
-}
-
-pub struct DecodingSession {
-    pub(super) session: vk::VideoSessionKHR,
-    pub(super) _session_memories: Vec<vk::DeviceMemory>,
-    pub(super) video_loader: video_queue::Device,
-    pub(super) decode_loader: VideoDecodeLoader,
-    pub(super) session_parameters: vk::VideoSessionParametersKHR,
-}
 pub const FRAMES_IN_FLIGHT: u8 = 3;
-
-struct SupportedCodecs {
-    h264: bool,
-    h265: bool,
-    av1: bool,
-}
-impl Default for SupportedCodecs {
-    fn default() -> Self {
-        Self {
-            h264: false,
-            h265: false,
-            av1: false,
-        }
-    }
-}
-
+const DPB_POOL_SIZE: usize = 16;
 #[allow(dead_code)]
 pub struct Aura {
-    pub(super) _entry: Entry,
+    pub _entry: Entry,
     pub _instance: Instance,
-    pub video_instance_ext: ash::khr::video_queue::Instance,
-    pub physical_device: vk::PhysicalDevice,
-    pub device: ash::Device,
     pub _debug_utils_loader: ash::ext::debug_utils::Instance,
     pub _debug_messenger: DebugUtilsMessengerEXT,
-    pub(super) _video_queue_family_index: u32,
-    pub(super) _graphics_queue_family_index: u32,
-    pub(super) _session_memories: Vec<vk::DeviceMemory>,
-    pub(super) session: vk::VideoSessionKHR,
-    pub(super) bitstream_buffers: [vk::Buffer; FRAMES_IN_FLIGHT as usize],
-    pub(super) bitstream_memories: [vk::DeviceMemory; FRAMES_IN_FLIGHT as usize],
-    pub(super) bitstream_sizes: [u32; FRAMES_IN_FLIGHT as usize],
-    pub(super) video_loader: video_queue::Device,
-    pub(super) decode_loader: VideoDecodeLoader,
-    pub(super) graphics_queue: vk::Queue,
-    pub(super) video_queue: vk::Queue,
-    pub(super) surface: vk::SurfaceKHR,
-    pub(super) surface_loader: ash::khr::surface::Instance,
-    pub(super) session_parameters: vk::VideoSessionParametersKHR,
-    pub(super) dpb_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
-    pub(super) dst_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
-    pub(super) current_frame_count_idx: usize,
-    pub(super) dpb_pool_size: usize,
+    pub _video_queue_family_index: u32,
+    pub _graphics_queue_family_index: u32,
+    pub _session_memories: Vec<vk::DeviceMemory>,
+
+    
+    pub physical_device: vk::PhysicalDevice,
+    pub device: ash::Device,
+
+    pub session: vk::VideoSessionKHR,
+    pub video_instance_ext: ash::khr::video_queue::Instance,
+    pub bitstream_buffers: [vk::Buffer; FRAMES_IN_FLIGHT as usize],
+    pub bitstream_memories: [vk::DeviceMemory; FRAMES_IN_FLIGHT as usize],
+    pub bitstream_sizes: [u32; FRAMES_IN_FLIGHT as usize],
+    pub video_loader: video_queue::Device,
+    pub decode_loader: VideoDecodeLoader,
+    
+    pub graphics_queue: vk::Queue,
+    pub video_queue: vk::Queue,
+    pub surface: vk::SurfaceKHR,
+    pub surface_loader: ash::khr::surface::Instance,
+    pub session_parameters: vk::VideoSessionParametersKHR,
+    
+    /*
+     * My VCN 2.0 doesn't support a single pool for dst and dpb at the same time.
+     * This should be changed in the future.
+     */
+    pub dpb_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>, // Decoded Pictures Buffer used as reference to decode P-frames and B-frames.
+    pub dst_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>, // Stores the current decoded image.
+    pub dpb_pocs: Vec<i32>,
+    pub dpb_pool_size: usize,
+    pub dpb_slot_valid: Vec<bool>,
+    pub current_frame_count_idx: usize,
     pub graphics_command_pool: vk::CommandPool,
     pub graphics_command_buffers: Vec<vk::CommandBuffer>,
     pub video_command_pool: vk::CommandPool,
     pub video_command_buffers: Vec<vk::CommandBuffer>,
+    
     pub swapchain_loader: ash::khr::swapchain::Device,
     pub swapchain: vk::SwapchainKHR,
     pub swapchain_images: Vec<vk::Image>,
     pub swapchain_image_views: Vec<vk::ImageView>,
     pub swapchain_format: vk::Format,
     pub swapchain_extent: vk::Extent2D,
+
     pub present_complete_semaphores: Vec<vk::Semaphore>,
     pub render_complete_semaphores: Vec<vk::Semaphore>,
     pub graphics_complete_semaphores: Vec<vk::Semaphore>,
     pub render_fences: [vk::Fence; FRAMES_IN_FLIGHT as usize],
+
+    pub pipeline_layout: vk::PipelineLayout,
+    pub pipeline: vk::Pipeline,
     pub descriptor_set_layouts: Vec<vk::DescriptorSetLayout>,
     pub descriptor_pool: vk::DescriptorPool,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
+    pub ycbcr_conversion: vk::SamplerYcbcrConversion,
     video_sampler: vk::Sampler,
-    pub pipeline_layout: vk::PipelineLayout,
-    pub pipeline: vk::Pipeline,
+
     pub viewport: vk::Viewport,
     pub scissor: vk::Rect2D,
-    pub extent: vk::Extent2D,
-    pub ycbcr_conversion: vk::SamplerYcbcrConversion,
+    pub video_extent: vk::Extent2D,
     pub frames_in_flight: u8,
-    pub dpb_frame_nums: [u16; 16],
+    pub dpb_frame_nums: [u16; DPB_POOL_SIZE],
     supported_decoders: SupportedCodecs,
 }
 
@@ -105,7 +89,6 @@ impl Aura {
     // Constants
 
     pub fn new(window: &winit::window::Window, extradata: &Vec<u8>) -> Self {
-        const dpb_pool_size: usize = 16;
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
         match unsafe { entry.try_enumerate_instance_version().unwrap() } {
             Some(version) => {
@@ -124,33 +107,20 @@ impl Aura {
         };
         let layers_pointers: Vec<*const std::os::raw::c_char> =
             layer_names.iter().map(|&name| name).collect();
-        let mut instance_extensions =
+        let mut required_instance_extensions: Vec<&CStr> =
             ash_window::enumerate_required_extensions(window.display_handle().unwrap().as_raw())
                 .expect("Failed to retrieve window extensions.")
-                .to_vec();
-        instance_extensions.push(ash::ext::debug_utils::NAME.as_ptr());
-        instance_extensions.push(vk::KHR_SURFACE_MAINTENANCE1_NAME.as_ptr());
-        instance_extensions.push(vk::KHR_GET_SURFACE_CAPABILITIES2_NAME.as_ptr());
-        let available_extensions = unsafe {
-            entry
-                .enumerate_instance_extension_properties(None)
-                .unwrap()
-                .into_iter()
-        };
-        log::info!("------------ Available Instance Extensions -----------");
-        for extension in available_extensions {
-            log::info!("{:?}", extension.extension_name_as_c_str().unwrap());
-        }
-        log::info!("------------ Required Instance Extensions -----------");
-        for extension_ptr in &instance_extensions {
-            unsafe {
-                let c_str = std::ffi::CStr::from_ptr(*extension_ptr);
-                let name = c_str.to_string_lossy();
-                log::info!("Extension: {}", name);
-            }
-        }
-        log::info!("------------------------------------------------------");
-
+                .iter()
+                .map(|&ptr| unsafe { CStr::from_ptr(ptr) })
+                .collect();
+        required_instance_extensions.push(ash::ext::debug_utils::NAME);
+        required_instance_extensions.push(vk::KHR_SURFACE_MAINTENANCE1_NAME);
+        required_instance_extensions.push(vk::KHR_GET_SURFACE_CAPABILITIES2_NAME);
+        Self::log_instance_extensions(&entry, &required_instance_extensions);
+        let extension_pointers: Vec<*const i8> = required_instance_extensions
+            .iter()
+            .map(|cstr| cstr.as_ptr())
+            .collect();
         log::info!("Creating Vulkan instance.");
         let app_name = c"Aura";
         let app_info = vk::ApplicationInfo::default()
@@ -160,7 +130,7 @@ impl Aura {
         let instance_create_info = vk::InstanceCreateInfo::default()
             .application_info(&app_info)
             .enabled_layer_names(&layers_pointers)
-            .enabled_extension_names(&instance_extensions);
+            .enabled_extension_names(&extension_pointers);
         let instance = unsafe {
             entry
                 .create_instance(&instance_create_info, None)
@@ -380,7 +350,7 @@ impl Aura {
             &device,
             &mut video_profile,
             ycbcr_conversion,
-            dpb_pool_size,
+            DPB_POOL_SIZE,
         );
         let semaphore_create_info = vk::SemaphoreCreateInfo::default();
         let frames_in_flight_fences_info =
@@ -462,7 +432,7 @@ impl Aura {
             _session_memories: _session_memories,
             _debug_utils_loader: _debug_utils_loader,
             _debug_messenger: _debug_messenger,
-            
+
             device: device,
             surface: surface,
             surface_loader: surface_loader,
@@ -484,37 +454,38 @@ impl Aura {
             video_queue: video_queue,
             session_parameters: session_parameters,
 
-            
-
             swapchain_loader: swapchain_loader,
             swapchain: swapchain,
             swapchain_images: swapchain_images,
             swapchain_image_views: swapchain_image_views,
             swapchain_format: swapchain_format,
             swapchain_extent: swapchain_extent,
-            
+
             present_complete_semaphores: present_complete_semaphores,
             render_complete_semaphores: render_complete_semaphores,
             graphics_complete_semaphores: graphics_complete_semaphores,
-            
             render_fences: frames_in_flight_fences,
-            video_sampler: video_sampler,
-            descriptor_set_layouts: descriptor_set_layouts,
+
             pipeline_layout: pipeline_layout,
             pipeline: pipeline,
+            video_sampler: video_sampler,
+            descriptor_set_layouts: descriptor_set_layouts,
+            
             dpb_pool: dpb_pool,
             dst_pool: dst_pool,
             current_frame_count_idx: 0,
-            dpb_pool_size: dpb_pool_size,
-            dpb_frame_nums: [0 as u16; dpb_pool_size as usize],
+            dpb_pool_size: DPB_POOL_SIZE,
+            dpb_frame_nums: [0 as u16; DPB_POOL_SIZE as usize],
+            dpb_slot_valid: vec![false; DPB_POOL_SIZE],
+            dpb_pocs: vec![0; DPB_POOL_SIZE],
             descriptor_pool: descriptor_pool,
             descriptor_sets: descriptor_sets,
-            
+
             viewport: viewport,
             scissor: scissor,
-            extent: vk::Extent2D {
+            video_extent: vk::Extent2D {
                 width: 1920,
-                height: 1080,
+                height: 1080u32.div_ceil(16) * 16,
             },
             frames_in_flight: FRAMES_IN_FLIGHT,
             supported_decoders: supported_decoders,
