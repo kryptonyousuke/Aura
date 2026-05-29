@@ -18,6 +18,16 @@
 | H.265 | 🚧 | Coming soon |
 | AV1 | 🚧 | Coming soon |
 
+# Usage
+```bash
+cargo run --release -- --file-name test_h264.mp4
+# or directly:
+./Aura --file-name test_h264.mp4
+```
+> [!WARNING]
+> Aura currently just supports h264 main without B-frames.
+
+
 ## Stonks!!
 
 ![](https://starchart.cc/kryptonyousuke/Aura.svg?background=%2302000000&axis=%23333333&line=%237c44ff)
