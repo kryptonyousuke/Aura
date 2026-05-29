@@ -7,7 +7,13 @@ use ash::{Device, vk};
 use std::mem::MaybeUninit;
 use std::u64;
 pub trait H264Decoder {
-    fn decode_frame(&mut self, bitstream_data: &[u8], slice_offsets: &[u32], is_first_frame: bool);
+    fn decode_frame(
+        &mut self,
+        bitstream_data: &[u8],
+        slice_offsets: &[u32],
+        is_first_frame: bool,
+        sps: &vk::native::StdVideoH264SequenceParameterSet,
+    );
     unsafe fn create_h264_session_parameters(
         device: &Device,
         video_loader: &video_queue::Device,
@@ -16,20 +22,24 @@ pub trait H264Decoder {
     ) -> vk::VideoSessionParametersKHR;
 }
 impl H264Decoder for Aura {
-    fn decode_frame(&mut self, bitstream_data: &[u8], slice_offsets: &[u32], is_first_frame: bool) {
-        // std::thread::sleep(std::time::Duration::from_millis(200));
-        let frame_idx = (self.current_frame_index % self.dpb_pool_size) as usize;
+    fn decode_frame(
+        &mut self,
+        bitstream_data: &[u8],
+        slice_offsets: &[u32],
+        is_first_frame: bool,
+        sps: &vk::native::StdVideoH264SequenceParameterSet,
+    ) {
+        let frame_idx = (self.current_frame_count_idx % self.dpb_pool_size) as usize;
         let (dst_image, _, dst_view) = self.dst_pool[frame_idx];
         let (_dpb_image, _, dpb_view) = self.dpb_pool[frame_idx];
-        log::debug!("current_frame_index: {}", self.current_frame_index);
+        log::debug!("current_frame_count_idx: {}", self.current_frame_count_idx);
         log::debug!("dpb_pool_size: {}", self.dpb_pool_size);
         log::debug!("frame_idx: {}", frame_idx);
-        //let aligned_size = (bitstream_data.len() as u64 + 127) & !127;
         let swapchain_sync_idx =
-            (self.current_frame_index % self.frames_in_flight as usize) as usize;
+            (self.current_frame_count_idx % self.frames_in_flight as usize) as usize;
         let aligned_size = self.bitstream_sizes[swapchain_sync_idx];
         unsafe {
-            self.upload_bitstream_packet(bitstream_data, swapchain_sync_idx);
+            self.upload_bitstream_packet(bitstream_data, swapchain_sync_idx); // Upload the current bitstream buffer (RAM) into a vulkan buffer (VRAM).
 
             log::debug!("swapchain_sync_idx: {}", swapchain_sync_idx);
             let _ = self
@@ -39,7 +49,7 @@ impl H264Decoder for Aura {
             let _ = self
                 .device
                 .reset_fences(&[self.render_fences[swapchain_sync_idx]]);
-            let (image_index, _is_suboptimal) = self
+            let (swapchain_available_image_idx, _is_suboptimal) = self
                 .swapchain_loader
                 .acquire_next_image(
                     self.swapchain,
@@ -49,7 +59,7 @@ impl H264Decoder for Aura {
                 )
                 .unwrap();
             let color_attachment_info = vk::RenderingAttachmentInfoKHR::default()
-                .image_view(self.swapchain_image_views[image_index as usize])
+                .image_view(self.swapchain_image_views[swapchain_available_image_idx as usize])
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
@@ -74,6 +84,7 @@ impl H264Decoder for Aura {
             self.device
                 .begin_command_buffer(self.video_command_buffers[swapchain_sync_idx], &begin_info)
                 .unwrap();
+
             let subresource_range = vk::ImageSubresourceRange::default()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
                 .base_mip_level(0)
@@ -86,6 +97,8 @@ impl H264Decoder for Aura {
                 .level_count(1)
                 .base_array_layer(0)
                 .layer_count(1);
+
+            // Barriers
             let buffer_barriers = [vk::BufferMemoryBarrier2::default()
                 .src_stage_mask(vk::PipelineStageFlags2::HOST)
                 .src_access_mask(vk::AccessFlags2::HOST_WRITE)
@@ -124,14 +137,57 @@ impl H264Decoder for Aura {
                 self.video_command_buffers[swapchain_sync_idx],
                 &dependency_info,
             );
-
+            let slice_offset = slice_offsets[0] as usize;
+            let slice_data = &bitstream_data[slice_offset..];
             let mut std_pic_info: vk::native::StdVideoDecodeH264PictureInfo =
                 MaybeUninit::zeroed().assume_init();
-            std_pic_info.flags.set_IdrPicFlag(is_first_frame as u32);
-            std_pic_info.flags.set_is_reference(1);
-            std_pic_info.frame_num = (self.current_frame_index % 16) as u16;
-            std_pic_info.PicOrderCnt = [self.current_frame_index as i32, 0];
+            let mut real_frame_num = 0;
+            let mut real_poc = 0;
+            if let Some(nalu_header) = crate::video::converter::NaluHeader::parse(slice_data) {
+                log::debug!("NALU Parsed: {:?}", nalu_header);
+                let is_reference = nalu_header.nal_ref_idc > 0;
+                let is_idr = nalu_header.nal_unit_type == 5;
+                std_pic_info.flags.set_IdrPicFlag(is_idr as u32);
+                std_pic_info.flags.set_is_reference(is_reference as u32);
+                let sps_info = crate::video::converter::SpsInfo {
+                    log2_max_frame_num_minus4: sps.log2_max_frame_num_minus4,
+                    frame_mbs_only_flag: sps.flags.frame_mbs_only_flag() != 0,
+                    pic_order_cnt_type: sps.pic_order_cnt_type as u8,
+                    log2_max_pic_order_cnt_lsb_minus4: sps.log2_max_pic_order_cnt_lsb_minus4,
+                };
 
+                if let Some(slice_header) = crate::video::converter::parse_slice_header(
+                    &slice_data[nalu_header.slice_header_offset..],
+                    nalu_header.nal_unit_type,
+                    &sps_info,
+                ) {
+                    real_frame_num = slice_header.frame_num;
+                    self.dpb_frame_nums[frame_idx] = real_frame_num;
+                    real_poc = match sps.pic_order_cnt_type {
+                        0 => slice_header.pic_order_cnt_lsb as i32,
+                        2 => (real_frame_num as i32) * 2,
+                        _ => {
+                            log::warn!(
+                                "pic_order_cnt_type {} does not exist, using fallback.",
+                                sps.pic_order_cnt_type
+                            );
+                            (real_frame_num as i32) * 2
+                        }
+                    };
+                    log::debug!(
+                        "Slice Header successfully decoded. FrameNum: {}, POC: {}",
+                        real_frame_num,
+                        real_poc
+                    );
+                } else {
+                    log::warn!("Failed to parse slice_header, using linear fallback.");
+                    real_frame_num = (self.current_frame_count_idx % 16) as u16;
+                    real_poc = self.current_frame_count_idx as i32;
+                }
+
+                std_pic_info.frame_num = real_frame_num;
+                std_pic_info.PicOrderCnt = [real_poc, 0];
+            }
             let mut h264_decode_info = vk::VideoDecodeH264PictureInfoKHR::default()
                 .std_picture_info(&std_pic_info)
                 .slice_offsets(slice_offsets);
@@ -139,16 +195,16 @@ impl H264Decoder for Aura {
             let mut std_setup_info: vk::native::StdVideoDecodeH264ReferenceInfo =
                 MaybeUninit::zeroed().assume_init();
             std_setup_info.FrameNum = std_pic_info.frame_num;
+            std_setup_info.PicOrderCnt = std_pic_info.PicOrderCnt;
 
             let mut h264_setup_slot_info_decode =
                 vk::VideoDecodeH264DpbSlotInfoKHR::default().std_reference_info(&std_setup_info);
 
             let mut h264_setup_slot_info_begin =
                 vk::VideoDecodeH264DpbSlotInfoKHR::default().std_reference_info(&std_setup_info);
-
             let setup_resource = vk::VideoPictureResourceInfoKHR::default()
                 .image_view_binding(dpb_view)
-                .coded_extent(self.extent)
+                .coded_extent(vk::Extent2D::default().width(1920).height(1088))
                 .base_array_layer(0);
             let setup_slot_decode = vk::VideoReferenceSlotInfoKHR::default()
                 .slot_index(frame_idx as i32)
@@ -159,65 +215,12 @@ impl H264Decoder for Aura {
                 .picture_resource(&setup_resource)
                 .push(&mut h264_setup_slot_info_begin);
 
-            let mut refs_std = Vec::new();
-            let mut refs_resource = Vec::new();
-            let mut refs_h264: Vec<vk::VideoDecodeH264DpbSlotInfoKHR>;
-
             let mut reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = Vec::new();
 
             let mut coding_reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> =
                 vec![setup_slot_begin];
 
-            if !is_first_frame {
-                let max_refs = std::cmp::min(
-                    self.current_frame_index as u32,
-                    (self.dpb_pool_size as u32) - 1,
-                );
-                for i in 0..max_refs {
-                    let ref_offset = (i + 1) as usize;
-                    let ref_idx =
-                        (self.current_frame_index.wrapping_sub(ref_offset)) % self.dpb_pool_size;
-
-                    if ref_idx < self.current_frame_index {
-                        let (_, _, view) = self.dpb_pool[ref_idx];
-
-                        let mut std_ref: vk::native::StdVideoDecodeH264ReferenceInfo =
-                            MaybeUninit::zeroed().assume_init();
-                        std_ref.FrameNum = ((self.current_frame_index - ref_offset) % 16) as u16;
-                        refs_std.push(std_ref);
-
-                        refs_resource.push(
-                            vk::VideoPictureResourceInfoKHR::default()
-                                .image_view_binding(view)
-                                .coded_extent(self.extent)
-                                .base_array_layer(0),
-                        );
-                    }
-                }
-
-                refs_h264 = refs_std
-                    .iter()
-                    .map(|std_ref| {
-                        vk::VideoDecodeH264DpbSlotInfoKHR::default().std_reference_info(std_ref)
-                    })
-                    .collect();
-
-                for (i, h264_info) in refs_h264.iter_mut().enumerate() {
-                    let ref_offset = i + 1;
-                    let ref_idx =
-                        (self.current_frame_index.wrapping_sub(ref_offset)) % self.dpb_pool_size;
-
-                    let slot = vk::VideoReferenceSlotInfoKHR::default()
-                        .slot_index(ref_idx as i32)
-                        .picture_resource(&refs_resource[i])
-                        .push(h264_info);
-
-                    reference_slots.push(slot);
-                    coding_reference_slots.push(slot);
-                }
-            }
-
-            // 5. Begin Coding
+            // Start the coding session
             let begin_coding_info = vk::VideoBeginCodingInfoKHR::default()
                 .video_session(self.session)
                 .video_session_parameters(self.session_parameters)
@@ -237,11 +240,10 @@ impl H264Decoder for Aura {
                 );
             }
 
-            // 6. Decode
-
+            // Decode the bitstream
             let dst_resource = vk::VideoPictureResourceInfoKHR::default()
                 .image_view_binding(dst_view)
-                .coded_extent(self.extent)
+                .coded_extent(vk::Extent2D::default().width(1920).height(1088))
                 .base_array_layer(0);
 
             let decode_info = vk::VideoDecodeInfoKHR::default()
@@ -255,7 +257,8 @@ impl H264Decoder for Aura {
 
             self.decode_loader
                 .cmd_decode_video(self.video_command_buffers[swapchain_sync_idx], &decode_info);
-            // 7. End Coding & Submit Execution
+
+            // End coding session and submit execution
             self.video_loader.cmd_end_video_coding(
                 self.video_command_buffers[swapchain_sync_idx],
                 &vk::VideoEndCodingInfoKHR::default(),
@@ -268,24 +271,23 @@ impl H264Decoder for Aura {
                 self._video_queue_family_index,
                 self._graphics_queue_family_index,
             );
-
             self.device
                 .end_command_buffer(self.video_command_buffers[swapchain_sync_idx])
                 .expect("Erro buffer");
+
             let video_command_buffer_submit_info = &[vk::CommandBufferSubmitInfo::default()
                 .command_buffer(self.video_command_buffers[swapchain_sync_idx])];
             let render_semaphores_submit_info = &[vk::SemaphoreSubmitInfo::default()
-                .semaphore(self.render_complete_semaphores[image_index as usize])
+                .semaphore(self.render_complete_semaphores[swapchain_available_image_idx as usize])
                 .stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)];
-
             let present_semaphores_submit_info = &[vk::SemaphoreSubmitInfo::default()
                 .semaphore(self.present_complete_semaphores[swapchain_sync_idx as usize])
                 .stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)];
-
             let submit_info = vk::SubmitInfo2::default()
                 .command_buffer_infos(video_command_buffer_submit_info)
                 .wait_semaphore_infos(present_semaphores_submit_info)
                 .signal_semaphore_infos(render_semaphores_submit_info);
+
             self.device
                 .queue_submit2(self.video_queue, &[submit_info], vk::Fence::null())
                 .unwrap();
@@ -329,10 +331,12 @@ impl H264Decoder for Aura {
             Aura::acquire_swapchain_barrier(
                 &self.device,
                 self.graphics_command_buffers[swapchain_sync_idx],
-                self.swapchain_images[image_index as usize],
+                self.swapchain_images[swapchain_available_image_idx as usize],
                 swapchain_subresource_range,
                 self._graphics_queue_family_index,
             );
+
+            // Dynamic Rendering
             self.device.cmd_begin_rendering(
                 self.graphics_command_buffers[swapchain_sync_idx],
                 &rendering_info,
@@ -364,8 +368,8 @@ impl H264Decoder for Aura {
             let cmd_buf_graphics_info = [vk::CommandBufferSubmitInfo::default()
                 .command_buffer(self.graphics_command_buffers[swapchain_sync_idx])];
             let cmd_buf_graphics_wait_infos = [vk::SemaphoreSubmitInfo::default()
-                .semaphore(self.render_complete_semaphores[image_index as usize])
-                .stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)];
+                .semaphore(self.render_complete_semaphores[swapchain_available_image_idx as usize])
+                .stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)];
 
             Aura::release_graphic_on_dst(
                 &self.device,
@@ -379,7 +383,7 @@ impl H264Decoder for Aura {
             Aura::release_swapchain_barrier(
                 &self.device,
                 self.graphics_command_buffers[swapchain_sync_idx],
-                self.swapchain_images[image_index as usize],
+                self.swapchain_images[swapchain_available_image_idx as usize],
                 swapchain_subresource_range,
                 self._graphics_queue_family_index,
             );
@@ -387,8 +391,9 @@ impl H264Decoder for Aura {
             self.device
                 .end_command_buffer(self.graphics_command_buffers[swapchain_sync_idx])
                 .unwrap();
-            let cmd_buf_graphics_complete_infos = [vk::SemaphoreSubmitInfo::default()
-                .semaphore(self.graphics_complete_semaphores[image_index as usize])];
+            let cmd_buf_graphics_complete_infos = [vk::SemaphoreSubmitInfo::default().semaphore(
+                self.graphics_complete_semaphores[swapchain_available_image_idx as usize],
+            )];
             let graphics_submit = vk::SubmitInfo2::default()
                 .command_buffer_infos(&cmd_buf_graphics_info)
                 .wait_semaphore_infos(&cmd_buf_graphics_wait_infos)
@@ -402,20 +407,21 @@ impl H264Decoder for Aura {
                 .unwrap();
 
             let swapchains = [self.swapchain];
-            let image_indices = [image_index];
-            let present_wait_semaphores = [self.graphics_complete_semaphores[image_index as usize]];
+            let image_indices_available_for_present = [swapchain_available_image_idx];
+            let present_wait_semaphores =
+                [self.graphics_complete_semaphores[swapchain_available_image_idx as usize]];
 
             let present_info = vk::PresentInfoKHR::default()
                 .wait_semaphores(&present_wait_semaphores)
                 .swapchains(&swapchains)
-                .image_indices(&image_indices);
+                .image_indices(&image_indices_available_for_present);
 
             self.swapchain_loader
                 .queue_present(self.graphics_queue, &present_info)
                 .unwrap();
 
             log::debug!("Frame was sent to vulkan!");
-            self.current_frame_index += 1;
+            self.current_frame_count_idx += 1;
         }
     }
 

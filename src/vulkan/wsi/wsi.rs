@@ -1,5 +1,6 @@
 use crate::video::converter::avcc_to_annexb;
-use crate::vulkan::decoder::Decoder;
+use crate::video::video_clock::VideoClock;
+use crate::video::video_context::VideoContext;
 use crate::vulkan::decoders::h264::H264Decoder;
 use crate::vulkan::vk_init::Aura;
 use ffmpeg_next as ffmpeg;
@@ -7,13 +8,6 @@ use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
-
-pub struct VideoContext {
-    ictx: ffmpeg::format::context::Input,
-    video_stream_index: usize,
-    extradata: Vec<u8>,
-    is_first_frame: bool,
-}
 
 #[derive(Default)]
 pub struct App {
@@ -36,7 +30,9 @@ impl ApplicationHandler for App {
             let input_stream = ictx.streams().best(ffmpeg::media::Type::Video).unwrap();
             let video_stream_index = input_stream.index();
             let params = input_stream.parameters();
-
+            let rational_tb = input_stream.time_base();
+            let time_base_f64 = rational_tb.numerator() as f64 / rational_tb.denominator() as f64;
+            let clock = VideoClock::new(time_base_f64);
             let extradata = unsafe {
                 let raw_params = params.as_ptr();
                 if (*raw_params).extradata.is_null() {
@@ -49,20 +45,27 @@ impl ApplicationHandler for App {
                     .to_vec()
                 }
             };
-            let aura = Aura::new(&window, &extradata);
-
+            let nalu_length_size = if extradata.len() > 4 {
+                ((extradata[4] & 0x03) + 1) as usize
+            } else {
+                4 // Fallback
+            };
             log::info!(
                 "Vídeo file successfuly loaded. Extradata size: {}",
                 extradata.len()
             );
-            self.window = Some(window);
-            self.aura = Some(aura);
+            let aura = Aura::new(&window, &extradata);
             self.video_ctx = Some(VideoContext {
                 ictx,
                 video_stream_index,
                 extradata,
+                nalu_length_size,
                 is_first_frame: true,
+                clock: clock,
             });
+
+            self.window = Some(window);
+            self.aura = Some(aura);
 
             self.window.as_ref().unwrap().request_redraw();
         }
@@ -87,18 +90,32 @@ impl ApplicationHandler for App {
                     if let Some((stream, packet)) = v_ctx.ictx.packets().next() {
                         if stream.index() == v_ctx.video_stream_index {
                             if let Some(data) = packet.data() {
-                                let conversion = if v_ctx.is_first_frame {
-                                    avcc_to_annexb(data, &v_ctx.extradata)
-                                } else {
-                                    avcc_to_annexb(data, &[])
-                                };
+                                let conversion = avcc_to_annexb(data, v_ctx.nalu_length_size);
 
                                 match conversion {
                                     Ok((annexb, slice_offsets)) => {
+                                        if let Some(pts) = packet.pts().or_else(|| packet.dts()) {
+                                            if let Some(wait_duration) =
+                                                v_ctx.clock.time_till_next_frame(pts)
+                                            {
+                                                std::thread::sleep(wait_duration);
+                                            }
+                                        }
+                                        let std_sps =
+                                            crate::vulkan::decoders::h264_parser::parse_sps(
+                                                &v_ctx.extradata,
+                                            )
+                                            .expect("Failed to parse SPS");
+                                        let std_pps =
+                                            crate::vulkan::decoders::h264_parser::parse_pps(
+                                                &v_ctx.extradata,
+                                            )
+                                            .expect("Failed to parse PPS");
                                         aura.decode_frame(
                                             &annexb,
                                             &slice_offsets,
                                             v_ctx.is_first_frame,
+                                            &std_sps,
                                         );
                                         if v_ctx.is_first_frame {
                                             v_ctx.is_first_frame = false;

@@ -70,7 +70,7 @@ pub struct Aura {
     pub(super) session_parameters: vk::VideoSessionParametersKHR,
     pub(super) dpb_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
     pub(super) dst_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
-    pub(super) current_frame_index: usize,
+    pub(super) current_frame_count_idx: usize,
     pub(super) dpb_pool_size: usize,
     pub graphics_command_pool: vk::CommandPool,
     pub graphics_command_buffers: Vec<vk::CommandBuffer>,
@@ -97,6 +97,7 @@ pub struct Aura {
     pub extent: vk::Extent2D,
     pub ycbcr_conversion: vk::SamplerYcbcrConversion,
     pub frames_in_flight: u8,
+    pub dpb_frame_nums: [u16; 16],
     supported_decoders: SupportedCodecs,
 }
 
@@ -104,7 +105,7 @@ impl Aura {
     // Constants
 
     pub fn new(window: &winit::window::Window, extradata: &Vec<u8>) -> Self {
-        let dpb_pool_size = 16;
+        const dpb_pool_size: usize = 16;
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
         match unsafe { entry.try_enumerate_instance_version().unwrap() } {
             Some(version) => {
@@ -128,6 +129,8 @@ impl Aura {
                 .expect("Failed to retrieve window extensions.")
                 .to_vec();
         instance_extensions.push(ash::ext::debug_utils::NAME.as_ptr());
+        instance_extensions.push(vk::KHR_SURFACE_MAINTENANCE1_NAME.as_ptr());
+        instance_extensions.push(vk::KHR_GET_SURFACE_CAPABILITIES2_NAME.as_ptr());
         let available_extensions = unsafe {
             entry
                 .enumerate_instance_extension_properties(None)
@@ -143,7 +146,7 @@ impl Aura {
             unsafe {
                 let c_str = std::ffi::CStr::from_ptr(*extension_ptr);
                 let name = c_str.to_string_lossy();
-                log::info!("Extensão: {}", name);
+                log::info!("Extension: {}", name);
             }
         }
         log::info!("------------------------------------------------------");
@@ -209,6 +212,7 @@ impl Aura {
             vk::KHR_VIDEO_QUEUE_NAME.as_ptr(),
             vk::KHR_VIDEO_DECODE_QUEUE_NAME.as_ptr(),
             vk::KHR_VIDEO_DECODE_H264_NAME.as_ptr(),
+            vk::KHR_SWAPCHAIN_MAINTENANCE1_NAME.as_ptr(),
         ];
 
         let mut sync2_features =
@@ -220,6 +224,9 @@ impl Aura {
         let mut sampler_ycbcr_conversion =
             vk::PhysicalDeviceSamplerYcbcrConversionFeaturesKHR::default()
                 .sampler_ycbcr_conversion(true);
+        let mut swapchain_maintenance1 =
+            vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT::default()
+                .swapchain_maintenance1(true);
 
         let queue_priorities = [1.0f32];
         let queue_info = [
@@ -237,7 +244,8 @@ impl Aura {
             .push(&mut sync2_features)
             .push(&mut video_maintenance)
             .push(&mut sampler_ycbcr_conversion)
-            .push(&mut dynamic_rendering);
+            .push(&mut dynamic_rendering)
+            .push(&mut swapchain_maintenance1);
 
         let device = unsafe {
             instance
@@ -449,19 +457,21 @@ impl Aura {
         Self {
             _entry: entry,
             _instance: instance,
-            device: device,
-            surface: surface,
-            surface_loader: surface_loader,
             _video_queue_family_index: decode_queue_family_index,
             _graphics_queue_family_index: graphics_queue_family_index,
-            video_instance_ext: video_instance_ext,
-            physical_device: physical_device,
-            session: session,
-            graphics_command_pool: graphics_command_pool,
-            video_command_pool: video_command_pool,
             _session_memories: _session_memories,
             _debug_utils_loader: _debug_utils_loader,
             _debug_messenger: _debug_messenger,
+            
+            device: device,
+            surface: surface,
+            surface_loader: surface_loader,
+            video_instance_ext: video_instance_ext,
+            physical_device: physical_device,
+
+            graphics_command_pool: graphics_command_pool,
+            video_command_pool: video_command_pool,
+            session: session,
             bitstream_buffers: bitstream_buffers,
             bitstream_memories: bitstream_memories,
             bitstream_sizes: bitstream_sizes,
@@ -473,26 +483,33 @@ impl Aura {
             graphics_queue: graphics_queue,
             video_queue: video_queue,
             session_parameters: session_parameters,
-            dpb_pool: dpb_pool,
-            dst_pool: dst_pool,
-            current_frame_index: 0,
-            dpb_pool_size: dpb_pool_size,
+
+            
+
             swapchain_loader: swapchain_loader,
             swapchain: swapchain,
             swapchain_images: swapchain_images,
             swapchain_image_views: swapchain_image_views,
             swapchain_format: swapchain_format,
             swapchain_extent: swapchain_extent,
+            
             present_complete_semaphores: present_complete_semaphores,
             render_complete_semaphores: render_complete_semaphores,
             graphics_complete_semaphores: graphics_complete_semaphores,
+            
             render_fences: frames_in_flight_fences,
             video_sampler: video_sampler,
             descriptor_set_layouts: descriptor_set_layouts,
             pipeline_layout: pipeline_layout,
             pipeline: pipeline,
+            dpb_pool: dpb_pool,
+            dst_pool: dst_pool,
+            current_frame_count_idx: 0,
+            dpb_pool_size: dpb_pool_size,
+            dpb_frame_nums: [0 as u16; dpb_pool_size as usize],
             descriptor_pool: descriptor_pool,
             descriptor_sets: descriptor_sets,
+            
             viewport: viewport,
             scissor: scissor,
             extent: vk::Extent2D {
@@ -520,15 +537,16 @@ impl Aura {
         let dpb_format = vk::Format::G8_B8R8_2PLANE_420_UNORM;
         let mut profile_list =
             vk::VideoProfileListInfoKHR::default().profiles(std::slice::from_ref(&video_profile));
+        let dpb_dst_extent = vk::Extent3D {
+            width: 1920,
+            height: 1080,
+            depth: 1,
+        };
         let dpb_image_info = vk::ImageCreateInfo::default()
             .push(&mut profile_list)
             .image_type(vk::ImageType::TYPE_2D)
             .format(dpb_format)
-            .extent(vk::Extent3D {
-                width: 1920,
-                height: 1080,
-                depth: 1,
-            })
+            .extent(dpb_dst_extent.clone())
             .mip_levels(1)
             .array_layers(dpb_pool_size as u32)
             .samples(vk::SampleCountFlags::TYPE_1)
@@ -542,11 +560,7 @@ impl Aura {
             .push(&mut profile_list)
             .image_type(vk::ImageType::TYPE_2D)
             .format(dpb_format)
-            .extent(vk::Extent3D {
-                width: 1920,
-                height: 1080,
-                depth: 1,
-            })
+            .extent(dpb_dst_extent.clone())
             .mip_levels(1)
             .array_layers(dpb_pool_size as u32)
             .samples(vk::SampleCountFlags::TYPE_1)

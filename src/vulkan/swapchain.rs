@@ -1,5 +1,5 @@
 use crate::vulkan::vk_init::Aura;
-use ash::vk;
+use ash::vk::{self, TaggedStructure};
 impl Aura {
     pub unsafe fn create_swapchain(
         instance: &ash::Instance,
@@ -26,12 +26,9 @@ impl Aura {
                 .get_physical_device_surface_formats(physical_device, surface)
                 .unwrap()
         };
-        let present_modes = unsafe {
-            surface_loader
-                .get_physical_device_surface_present_modes(physical_device, surface)
-                .unwrap()
-        };
-
+        let present_modes = vec![vk::PresentModeKHR::FIFO, vk::PresentModeKHR::MAILBOX];
+        let mut present_modes_create_info =
+            vk::SwapchainPresentModesCreateInfoEXT::default().present_modes(&present_modes);
         let format = formats
             .iter()
             .cloned()
@@ -40,7 +37,6 @@ impl Aura {
                     && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
             })
             .unwrap_or(formats[0]);
-
         let present_mode = if present_modes.contains(&vk::PresentModeKHR::MAILBOX) {
             vk::PresentModeKHR::MAILBOX
         } else {
@@ -69,17 +65,18 @@ impl Aura {
         }
 
         let swapchain_create_info = vk::SwapchainCreateInfoKHR::default()
+            .push(&mut present_modes_create_info)
+            .present_mode(present_mode)
             .surface(surface)
             .min_image_count(image_count)
             .image_format(format.format)
             .image_color_space(format.color_space)
             .image_extent(extent)
             .image_array_layers(1)
-            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST)
+            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             .pre_transform(capabilities.current_transform)
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-            .present_mode(present_mode)
             .clipped(true);
 
         let swapchain_loader = ash::khr::swapchain::Device::load(instance, device);

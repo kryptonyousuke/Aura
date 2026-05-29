@@ -36,14 +36,6 @@ pub trait Decoder {
         video_queue_family: u32,
         graphics_queue_family: u32,
     );
-    unsafe fn acquire_image_graphic_on_dst(
-        device: &ash::Device,
-        cmd_buf_video: vk::CommandBuffer,
-        dst_image: vk::Image,
-        subresource_range: vk::ImageSubresourceRange,
-        video_queue_family: u32,
-        graphics_queue_family: u32,
-    );
     unsafe fn release_dst_on_graphic(
         device: &ash::Device,
         cmd_buf_video: vk::CommandBuffer,
@@ -116,7 +108,7 @@ impl Decoder for Aura {
             .reference_picture_format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
             .max_coded_extent(vk::Extent2D {
                 width: 1920,
-                height: 1080,
+                height: 1088,
             })
             .max_dpb_slots(16)
             .max_active_reference_pictures(16)
@@ -292,29 +284,6 @@ impl Decoder for Aura {
         let barriers = [image_barrier];
         let dependency = vk::DependencyInfo::default().image_memory_barriers(&barriers);
         unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };
-    }
-    unsafe fn acquire_image_graphic_on_dst(
-        device: &ash::Device,
-        cmd_buf_video: vk::CommandBuffer,
-        dst_image: vk::Image,
-        subresource_range: vk::ImageSubresourceRange,
-        video_queue_family: u32,
-        graphics_queue_family: u32,
-    ) {
-        let image_barrier = vk::ImageMemoryBarrier2::default()
-            .src_stage_mask(vk::PipelineStageFlags2::NONE)
-            .src_access_mask(vk::AccessFlags2::NONE)
-            .src_queue_family_index(graphics_queue_family)
-            .dst_stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)
-            .dst_access_mask(vk::AccessFlags2::VIDEO_DECODE_WRITE_KHR)
-            .dst_queue_family_index(video_queue_family)
-            .subresource_range(subresource_range)
-            .image(dst_image)
-            .old_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-            .new_layout(vk::ImageLayout::VIDEO_DECODE_DST_KHR);
-        let barriers = [image_barrier];
-        let dependency = vk::DependencyInfo::default().image_memory_barriers(&barriers);
-        unsafe { device.cmd_pipeline_barrier2(cmd_buf_video, &dependency) };
     }
     unsafe fn release_dst_on_graphic(
         device: &ash::Device,
