@@ -26,11 +26,11 @@ impl Default for SupportedCodecs {
     }
 }
 pub struct DecodingSession {
-    pub(super) session: vk::VideoSessionKHR,
-    pub(super) _session_memories: Vec<vk::DeviceMemory>,
-    pub(super) video_loader: video_queue::Device,
-    pub(super) decode_loader: VideoDecodeLoader,
-    pub(super) session_parameters: vk::VideoSessionParametersKHR,
+    pub(crate) session: vk::VideoSessionKHR,
+    pub(crate) _session_memories: Vec<vk::DeviceMemory>,
+    pub(crate) video_loader: video_queue::Device,
+    pub(crate) decode_loader: VideoDecodeLoader,
+    pub(crate) session_parameters: vk::VideoSessionParametersKHR,
 }
 
 pub trait Decoder {

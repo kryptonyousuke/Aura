@@ -1,5 +1,5 @@
 use super::debug;
-use crate::vulkan::decoder::{Decoder, DecodingSession, SupportedCodecs, DecodeExtensions};
+use crate::vulkan::decoders::decoder::{Decoder, DecodingSession, SupportedCodecs, DecodeExtensions};
 use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::sampler::Sampler;
 use crate::vulkan::shaders::Shaders;
