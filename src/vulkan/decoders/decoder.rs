@@ -38,6 +38,8 @@ pub trait Decoder {
         instance: &Instance,
         device: &Device,
         video_queue_index: u32,
+        picture_format: vk::Format,
+        reference_picture_format: vk::Format
     ) -> vk::VideoSessionKHR;
     fn bind_video_session_memory(
         instance: &Instance,
@@ -60,6 +62,8 @@ pub trait Decoder {
         device: &ash::Device,
         extradata: &Vec<u8>,
         queue_family_index: u32,
+        picture_format: vk::Format,
+        reference_picture_format: vk::Format
     ) -> DecodingSession;
     fn create_dpb_dst_pool(
         instance: &Instance,
@@ -77,6 +81,7 @@ pub trait Decoder {
     unsafe fn create_ycbcr_conversion(
         device: &ash::Device,
         format: vk::Format,
+        color_range: vk::SamplerYcbcrRange
     ) -> vk::SamplerYcbcrConversion;
     unsafe fn acquire_image_dst_on_graphic(
         device: &ash::Device,
@@ -131,6 +136,8 @@ impl Decoder for Aura {
         instance: &Instance,
         device: &Device,
         video_queue_index: u32,
+        picture_format: vk::Format,
+        reference_picture_format: vk::Format
     ) -> vk::VideoSessionKHR {
         // Will be a general use function.
         let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
@@ -154,8 +161,8 @@ impl Decoder for Aura {
         let create_info = vk::VideoSessionCreateInfoKHR::default()
             .queue_family_index(video_queue_index)
             .video_profile(&video_profile)
-            .picture_format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
-            .reference_picture_format(vk::Format::G8_B8R8_2PLANE_420_UNORM)
+            .picture_format(picture_format)
+            .reference_picture_format(reference_picture_format)
             .max_coded_extent(vk::Extent2D {
                 width: 4096,
                 height: 4096,
@@ -291,12 +298,13 @@ impl Decoder for Aura {
     unsafe fn create_ycbcr_conversion(
         device: &ash::Device,
         format: vk::Format,
+        color_range: vk::SamplerYcbcrRange
     ) -> vk::SamplerYcbcrConversion {
         unsafe {
             let ycbcr_info = vk::SamplerYcbcrConversionCreateInfo::default()
                 .format(format)
                 .ycbcr_model(vk::SamplerYcbcrModelConversion::YCBCR_709)
-                .ycbcr_range(vk::SamplerYcbcrRange::ITU_NARROW)
+                .ycbcr_range(color_range)
                 .components(vk::ComponentMapping {
                     r: vk::ComponentSwizzle::IDENTITY,
                     g: vk::ComponentSwizzle::IDENTITY,
@@ -318,11 +326,13 @@ impl Decoder for Aura {
         device: &ash::Device,
         extradata: &Vec<u8>,
         queue_family_index: u32,
+        picture_format: vk::Format,
+        reference_picture_format: vk::Format
     ) -> DecodingSession {
         let video_loader = video_queue::Device::load(instance, device);
         let decode_loader = VideoDecodeLoader::load(instance, device);
 
-        let session = Aura::create_video_session(instance, device, queue_family_index);
+        let session = Aura::create_video_session(instance, device, queue_family_index, picture_format, reference_picture_format);
 
         let session_parameters = unsafe {
             Aura::create_h264_session_parameters(device, &video_loader, extradata, session)

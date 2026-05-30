@@ -1,4 +1,5 @@
 use super::debug;
+use crate::video::video_context::VideoContext;
 use crate::vulkan::decoders::decoder::{Decoder, DecodingSession, SupportedCodecs, DecodeExtensions};
 use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::sampler::Sampler;
@@ -9,10 +10,17 @@ use ash::{
     vk,
     vk::{DebugUtilsMessengerEXT, TaggedStructure}
 };
+use ffmpeg_next::ffi::{AVColorPrimaries, AVColorRange, AVColorSpace};
 use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
-use std::ffi::CStr;
-pub const FRAMES_IN_FLIGHT: u8 = 3;
+use anyhow::Result;
+use std::ffi::{CStr, c_char};
+
+
+pub const SWAPHAIN_IMAGE_COUNT: u8 = 4;
+pub const FRAMES_IN_FLIGHT: u8 = SWAPHAIN_IMAGE_COUNT - 1;
 const DPB_POOL_SIZE: usize = 16;
+
+
 #[allow(dead_code)]
 pub struct Aura {
     pub _entry: Entry,
@@ -39,6 +47,7 @@ pub struct Aura {
     pub video_queue: vk::Queue,
     pub surface: vk::SurfaceKHR,
     pub surface_loader: ash::khr::surface::Instance,
+    pub video_color_range: vk::SamplerYcbcrRange,
     pub session_parameters: vk::VideoSessionParametersKHR,
     
     /*
@@ -66,9 +75,9 @@ pub struct Aura {
     pub swapchain_format: vk::Format,
     pub swapchain_extent: vk::Extent2D,
 
-    pub present_complete_semaphores: Vec<vk::Semaphore>,
-    pub render_complete_semaphores: Vec<vk::Semaphore>,
-    pub graphics_complete_semaphores: Vec<vk::Semaphore>,
+    pub present_complete_semaphores: [vk::Semaphore; SWAPHAIN_IMAGE_COUNT as usize],
+    pub render_complete_semaphores: [vk::Semaphore; SWAPHAIN_IMAGE_COUNT as usize],
+    pub graphics_complete_semaphores: [vk::Semaphore;  SWAPHAIN_IMAGE_COUNT as usize],
     pub render_fences: [vk::Fence; FRAMES_IN_FLIGHT as usize],
 
     pub pipeline_layout: vk::PipelineLayout,
@@ -89,7 +98,7 @@ pub struct Aura {
 impl Aura {
     // Constants
 
-    pub fn new(window: &winit::window::Window, extradata: &Vec<u8>) -> Self {
+    pub fn new(window: &winit::window::Window, extradata: &Vec<u8>, v_ctx: Option<&VideoContext>) -> Self {
 
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
         match unsafe { entry.try_enumerate_instance_version().unwrap() } {
@@ -225,8 +234,17 @@ impl Aura {
                 .expect("Failed to create a logical device.")
         };
 
-        // hardcoded extents and formats for DST and DPB
-        let dpb_and_dst_format = vk::Format::G8_B8R8_2PLANE_420_UNORM;
+        let dpb_and_dst_format: vk::Format = vk::Format::G8_B8R8_2PLANE_420_UNORM;
+        let video_color_range: vk::SamplerYcbcrRange = if let Some(v_ctx) = v_ctx {
+            unsafe {
+                let raw_params = v_ctx.params.as_ptr();
+                match (*raw_params).color_range {
+                    AVColorRange::AVCOL_RANGE_MPEG => vk::SamplerYcbcrRange::ITU_NARROW,
+                    AVColorRange::AVCOL_RANGE_JPEG => vk::SamplerYcbcrRange::ITU_FULL,
+                    _ => vk::SamplerYcbcrRange::ITU_NARROW
+                }
+            }
+        } else { vk::SamplerYcbcrRange::ITU_NARROW };
         let video_extent = vk::Extent2D {
             width: 1920,
             height: 1080u32.div_ceil(16) * 16, // h264 macroblocks are multiple of 16, 1088 is needed.
@@ -234,7 +252,7 @@ impl Aura {
 
         // Ycbcr Sampler
         let ycbcr_conversion =
-            unsafe { Self::create_ycbcr_conversion(&device, dpb_and_dst_format) };
+            unsafe { Self::create_ycbcr_conversion(&device, dpb_and_dst_format, video_color_range) };
         let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
             .std_profile_idc(vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_MAIN);
         let mut video_profile = vk::VideoProfileInfoKHR::default()
@@ -287,6 +305,8 @@ impl Aura {
             &device,
             extradata,
             decode_queue_family_index,
+            dpb_and_dst_format,
+            dpb_and_dst_format
         );
         let mut bitstream_buffers = [vk::Buffer::null(); FRAMES_IN_FLIGHT as usize];
         let mut bitstream_memories = [vk::DeviceMemory::null(); FRAMES_IN_FLIGHT as usize];
@@ -372,27 +392,18 @@ impl Aura {
         let frames_in_flight_fences_info =
             vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
-        let mut present_complete_semaphores = Vec::new();
-        let mut render_complete_semaphores = Vec::new();
-        let mut graphics_complete_semaphores = Vec::new();
+        let mut present_complete_semaphores = [vk::Semaphore::null(); SWAPHAIN_IMAGE_COUNT as usize];
+        let mut render_complete_semaphores = [vk::Semaphore::null(); SWAPHAIN_IMAGE_COUNT as usize];
+        let mut graphics_complete_semaphores = [vk::Semaphore::null(); SWAPHAIN_IMAGE_COUNT as usize];
 
-        for _ in 0..swapchain_images.len() {
+        for i in 0..swapchain_images.len() {
             unsafe {
-                present_complete_semaphores.push(
-                    device
-                        .create_semaphore(&semaphore_create_info, None)
-                        .unwrap(),
-                );
-                render_complete_semaphores.push(
-                    device
-                        .create_semaphore(&semaphore_create_info, None)
-                        .unwrap(),
-                );
-                graphics_complete_semaphores.push(
-                    device
-                        .create_semaphore(&semaphore_create_info, None)
-                        .unwrap(),
-                );
+                present_complete_semaphores[i] =
+                    device.create_semaphore(&semaphore_create_info, None).unwrap();
+                render_complete_semaphores[i] =
+                    device.create_semaphore(&semaphore_create_info, None).unwrap();
+                graphics_complete_semaphores[i] = 
+                    device.create_semaphore(&semaphore_create_info, None).unwrap();
             }
         }
 
@@ -455,7 +466,6 @@ impl Aura {
             video_instance_ext: video_instance_ext,
             physical_device: physical_device,
 
-            graphics_command_pool: graphics_command_pool,
             video_command_pool: video_command_pool,
             session: session,
             bitstream_buffers: bitstream_buffers,
@@ -464,12 +474,15 @@ impl Aura {
             video_loader: video_loader,
             decode_loader: decode_loader,
             ycbcr_conversion: ycbcr_conversion,
-            graphics_command_buffers: graphics_command_buffers,
             video_command_buffers: video_command_buffers,
             graphics_queue: graphics_queue,
             video_queue: video_queue,
             session_parameters: session_parameters,
+            video_color_range: video_color_range,
 
+
+            graphics_command_pool: graphics_command_pool,
+            graphics_command_buffers: graphics_command_buffers,
             swapchain_loader: swapchain_loader,
             swapchain: swapchain,
             swapchain_images: swapchain_images,

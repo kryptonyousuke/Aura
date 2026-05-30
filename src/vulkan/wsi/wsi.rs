@@ -65,15 +65,19 @@ impl ApplicationHandler for App {
                 "Vídeo file successfuly loaded. Extradata size: {}",
                 extradata.len()
             );
-            let aura = Aura::new(&window, &extradata);
-            self.video_ctx = Some(VideoContext {
-                ictx,
-                video_stream_index,
-                extradata,
-                nalu_length_size,
+            let v_ctx = VideoContext {
+                ictx: ictx,
+                video_stream_index: video_stream_index,
+                extradata: extradata.clone(),
+                nalu_length_size: nalu_length_size,
                 is_first_frame: true,
                 clock: clock,
-            });
+                params: params
+            };
+
+            
+            let aura = Aura::new(&window, &extradata, Some(&v_ctx));
+            self.video_ctx = Some(v_ctx);
 
             self.window = Some(window);
             self.aura = Some(aura);

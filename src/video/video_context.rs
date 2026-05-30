@@ -7,4 +7,5 @@ pub struct VideoContext {
     pub nalu_length_size: usize,
     pub is_first_frame: bool,
     pub clock: VideoClock,
+    pub params: ffmpeg_next::codec::Parameters
 }
