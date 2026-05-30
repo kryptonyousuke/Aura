@@ -1,3 +1,5 @@
+//! # H264 Headers Parser
+//! Gather the required information for the decoding pipeline from the extradata and NAL units.
 use ash::vk;
 use std::mem::MaybeUninit;
 

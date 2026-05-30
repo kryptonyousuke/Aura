@@ -1,4 +1,6 @@
-use crate::vulkan::decoder::Decoder;
+//! # H264 decoder
+//! Deals with the logic of the decoding pípeline.
+use super::decoder::Decoder;
 use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::vk_init::Aura;
 use ash::khr::video_queue;
@@ -22,6 +24,7 @@ pub trait H264Decoder {
     ) -> vk::VideoSessionParametersKHR;
 }
 impl H264Decoder for Aura {
+    /// Decode a h264 frame.
     fn decode_frame(
         &mut self,
         bitstream_data: &[u8],
@@ -424,7 +427,7 @@ impl H264Decoder for Aura {
             self.current_frame_count_idx += 1;
         }
     }
-
+    /// 
     unsafe fn create_h264_session_parameters(
         _device: &Device,
         video_loader: &video_queue::Device,
