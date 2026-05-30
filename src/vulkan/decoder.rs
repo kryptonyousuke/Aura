@@ -1,4 +1,5 @@
 use crate::vulkan::vk_init::Aura;
+use crate::vulkan::decoders::h264::H264Decoder;
 use ash::khr::video_queue;
 use ash::vk::TaggedStructure;
 use ash::{Device, Instance, vk, khr::{video_decode_queue::Device as VideoDecodeLoader}};
@@ -53,6 +54,26 @@ pub trait Decoder {
         prof: &vk::VideoProfileInfoKHR,
     ) -> (vk::Buffer, vk::DeviceMemory, u32);
     fn upload_bitstream_packet(&self, data: &[u8], swapchain_sync_idx: usize);
+    fn setup_decoder(
+        instance: &Instance,
+        physical_device: vk::PhysicalDevice,
+        device: &ash::Device,
+        extradata: &Vec<u8>,
+        queue_family_index: u32,
+    ) -> DecodingSession;
+    fn create_dpb_dst_pool(
+        instance: &Instance,
+        physical_device: vk::PhysicalDevice,
+        device: &ash::Device,
+        video_profile: &mut vk::VideoProfileInfoKHR,
+        ycbcr_conversion: vk::SamplerYcbcrConversion,
+        dpb_pool_size: usize,
+        dpb_format: vk::Format,
+        video_extent: vk::Extent2D
+    ) -> (
+        Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
+        Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
+    );
     unsafe fn create_ycbcr_conversion(
         device: &ash::Device,
         format: vk::Format,
@@ -289,6 +310,178 @@ impl Decoder for Aura {
                 .create_sampler_ycbcr_conversion(&ycbcr_info, None)
                 .expect("Failed to create YCbCr conversion.")
         }
+    }
+    
+    fn setup_decoder(
+        instance: &Instance,
+        physical_device: vk::PhysicalDevice,
+        device: &ash::Device,
+        extradata: &Vec<u8>,
+        queue_family_index: u32,
+    ) -> DecodingSession {
+        let video_loader = video_queue::Device::load(instance, device);
+        let decode_loader = VideoDecodeLoader::load(instance, device);
+
+        let session = Aura::create_video_session(instance, device, queue_family_index);
+
+        let session_parameters = unsafe {
+            Aura::create_h264_session_parameters(device, &video_loader, extradata, session)
+        };
+
+        let session_memories = Aura::bind_video_session_memory(
+            instance,
+            physical_device,
+            device,
+            &video_loader,
+            session,
+        );
+
+        DecodingSession {
+            session: session,
+            _session_memories: session_memories,
+            video_loader: video_loader,
+            decode_loader: decode_loader,
+            session_parameters: session_parameters,
+        }
+    }
+    fn create_dpb_dst_pool(
+        instance: &Instance,
+        physical_device: vk::PhysicalDevice,
+        device: &ash::Device,
+        video_profile: &mut vk::VideoProfileInfoKHR,
+        ycbcr_conversion: vk::SamplerYcbcrConversion,
+        dpb_pool_size: usize,
+        dpb_format: vk::Format,
+        video_extent: vk::Extent2D
+    ) -> (
+        Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
+        Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
+    ) {
+        let _output_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)> =
+            Vec::with_capacity(dpb_pool_size);
+        let mut profile_list =
+            vk::VideoProfileListInfoKHR::default().profiles(std::slice::from_ref(&video_profile));
+        let dpb_dst_extent = vk::Extent3D {
+            width: video_extent.width,
+            height: video_extent.height,
+            depth: 1,
+        };
+        let dpb_image_info = vk::ImageCreateInfo::default()
+            .push(&mut profile_list)
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(dpb_format)
+            .extent(dpb_dst_extent.clone())
+            .mip_levels(1)
+            .array_layers(dpb_pool_size as u32)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::VIDEO_DECODE_DPB_KHR)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+
+        let dpb_image = unsafe { device.create_image(&dpb_image_info, None).unwrap() };
+
+        let dst_image_info = vk::ImageCreateInfo::default()
+            .push(&mut profile_list)
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(dpb_format)
+            .extent(dpb_dst_extent.clone())
+            .mip_levels(1)
+            .array_layers(dpb_pool_size as u32)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::VIDEO_DECODE_DST_KHR | vk::ImageUsageFlags::SAMPLED)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+
+        let dst_image = unsafe { device.create_image(&dst_image_info, None).unwrap() };
+
+        let dpb_mem_requirements = unsafe { device.get_image_memory_requirements(dpb_image) };
+        let dst_mem_requirements = unsafe { device.get_image_memory_requirements(dst_image) };
+        let mem_properties =
+            unsafe { instance.get_physical_device_memory_properties(physical_device) };
+
+        let dpb_memory_type_index = (0..mem_properties.memory_type_count)
+            .find(|&i| {
+                let supported = (dpb_mem_requirements.memory_type_bits & (1 << i)) != 0;
+                let flags = mem_properties.memory_types[i as usize].property_flags;
+                supported && flags.contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+            })
+            .expect("Your GPU doesn't support the needed memory requirements for a DPB creation.");
+
+        let dst_memory_type_index = (0..mem_properties.memory_type_count)
+            .find(|&i| {
+                let supported = (dst_mem_requirements.memory_type_bits & (1 << i)) != 0;
+                let flags = mem_properties.memory_types[i as usize].property_flags;
+                supported && flags.contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+            })
+            .expect("Your GPU doesn't support the needed memory requirements for a DST creation.");
+
+        let dpb_alloc_info = vk::MemoryAllocateInfo::default()
+            .allocation_size(dpb_mem_requirements.size)
+            .memory_type_index(dpb_memory_type_index);
+        let dpb_memory = unsafe { device.allocate_memory(&dpb_alloc_info, None).unwrap() };
+
+        let dst_alloc_info = vk::MemoryAllocateInfo::default()
+            .allocation_size(dst_mem_requirements.size)
+            .memory_type_index(dst_memory_type_index);
+        let dst_memory = unsafe { device.allocate_memory(&dst_alloc_info, None).unwrap() };
+
+        unsafe {
+            device.bind_image_memory(dpb_image, dpb_memory, 0).unwrap();
+            device.bind_image_memory(dst_image, dst_memory, 0).unwrap();
+        }
+
+        let mut dst_pool = Vec::with_capacity(dpb_pool_size);
+        let mut dpb_pool = Vec::with_capacity(dpb_pool_size);
+        let mut local_ycbcr_info =
+            vk::SamplerYcbcrConversionInfo::default().conversion(ycbcr_conversion);
+
+        for i in 0..dpb_pool_size {
+            let dpb_view_info = vk::ImageViewCreateInfo::default()
+                .push(&mut local_ycbcr_info)
+                .image(dpb_image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(dpb_format)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: i as u32,
+                    layer_count: 1,
+                });
+            let mut local_ycbcr_info =
+                vk::SamplerYcbcrConversionInfo::default().conversion(ycbcr_conversion);
+
+            let dst_view_info = vk::ImageViewCreateInfo::default()
+                .push(&mut local_ycbcr_info)
+                .image(dst_image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(dpb_format)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: i as u32,
+                    layer_count: 1,
+                });
+
+            let dpb_image_view = unsafe { device.create_image_view(&dpb_view_info, None).unwrap() };
+            let dst_image_view = unsafe { device.create_image_view(&dst_view_info, None).unwrap() };
+
+            let dpb_mem_handle = if i == 0 {
+                dpb_memory
+            } else {
+                vk::DeviceMemory::null()
+            };
+            let dst_mem_handle = if i == 0 {
+                dst_memory
+            } else {
+                vk::DeviceMemory::null()
+            };
+
+            dpb_pool.push((dpb_image, dpb_mem_handle, dpb_image_view));
+            dst_pool.push((dst_image, dst_mem_handle, dst_image_view));
+        }
+        (dpb_pool, dst_pool)
     }
 
     unsafe fn acquire_image_dst_on_graphic(
