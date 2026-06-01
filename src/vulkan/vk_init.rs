@@ -4,7 +4,7 @@ use crate::vulkan::photon::decoder::{Decoder, DecodingSession};
 use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
 use crate::vulkan::photon::types::{DecodeExtensions, SupportedCodecs, VideoCodecsProfiles};
 use crate::vulkan::pipeline::Pipeline;
-use crate::vulkan::sampler::Sampler;
+use crate::vulkan::photon::sampler::Sampler;
 use crate::vulkan::shaders::Shaders;
 use ash::{
     Entry, Instance,

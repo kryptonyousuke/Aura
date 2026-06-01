@@ -3,7 +3,6 @@
 pub mod debug;
 pub mod photon;
 pub mod pipeline;
-pub mod sampler;
 pub mod shaders;
 pub mod swapchain;
 pub mod vk_init;
