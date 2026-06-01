@@ -28,7 +28,7 @@ fn main() {
                     .unwrap();
 
                 let out_dir = std::env::var("OUT_DIR").unwrap();
-                let output_path = Path::new(&out_dir).join(format!("{}.spv", file_name));
+                let output_path = Path::new(&out_dir).join(format!("{file_name}.spv"));
                 fs::write(output_path, artifact.as_binary_u8()).unwrap();
             }
         }

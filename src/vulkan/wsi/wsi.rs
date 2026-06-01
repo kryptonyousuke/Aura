@@ -1,7 +1,7 @@
 use crate::video::converter::avcc_to_annexb;
 use crate::video::video_clock::VideoClock;
 use crate::video::video_context::VideoContext;
-use crate::vulkan::decoders::h264::H264Decoder;
+use crate::vulkan::photon::h264::H264Decoder;
 use crate::vulkan::vk_init::Aura;
 use ffmpeg_next as ffmpeg;
 use winit::application::ApplicationHandler;
@@ -117,12 +117,12 @@ impl ApplicationHandler for App {
                                             }
                                         }
                                         let std_sps =
-                                            crate::vulkan::decoders::h264_parser::parse_sps(
+                                            crate::vulkan::photon::h264_parser::parse_sps(
                                                 &v_ctx.extradata,
                                             )
                                             .expect("Failed to parse SPS");
                                         let _std_pps =
-                                            crate::vulkan::decoders::h264_parser::parse_pps(
+                                            crate::vulkan::photon::h264_parser::parse_pps(
                                                 &v_ctx.extradata,
                                             )
                                             .expect("Failed to parse PPS");
@@ -137,7 +137,7 @@ impl ApplicationHandler for App {
                                         }
                                     }
                                     Err(err) => {
-                                        log::error!("Skip frame due to a parser error: {}", err);
+                                        log::error!("Skip frame due to a parser error: {err}");
                                     }
                                 }
                             }

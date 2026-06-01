@@ -1,30 +1,14 @@
+use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
+use crate::vulkan::photon::h264::H264Decoder;
 use crate::vulkan::vk_init::Aura;
-use crate::vulkan::decoders::h264::H264Decoder;
+use super::types::VideoCodecsProfiles::{self, H264Profiles, H265Profiles, AV1Profiles};
+use super::types::PhotonError;
 use ash::khr::video_queue;
-use ash::vk::TaggedStructure;
+use ash::vk::{TaggedStructure, VideoCodecOperationFlagsKHR};
 use ash::{Device, Instance, vk, khr::{video_decode_queue::Device as VideoDecodeLoader}};
-pub struct DecodeExtensions;
-use std::ffi::CStr;
+use anyhow::Result;
 
-impl DecodeExtensions {
-    pub const H264: &'static CStr = c"VK_KHR_video_decode_h264";
-    pub const H265: &'static CStr = c"VK_KHR_video_decode_h265";
-    pub const AV1: &'static CStr = c"VK_KHR_video_decode_av1";
-}
-pub struct SupportedCodecs {
-    pub h264: bool,
-    pub h265: bool,
-    pub av1: bool,
-}
-impl Default for SupportedCodecs {
-    fn default() -> Self {
-        Self {
-            h264: false,
-            h265: false,
-            av1: false,
-        }
-    }
-}
+
 pub struct DecodingSession {
     pub(crate) session: vk::VideoSessionKHR,
     pub(crate) _session_memories: Vec<vk::DeviceMemory>,
@@ -38,9 +22,14 @@ pub trait Decoder {
         instance: &Instance,
         device: &Device,
         video_queue_index: u32,
+        codec_operation: vk::VideoCodecOperationFlagsKHR,
+        profile_idc: Option<impl VideoProfile>,
+        chroma_subsampling: vk::VideoChromaSubsamplingFlagsKHR,
         picture_format: vk::Format,
+        luma_depth: vk::VideoComponentBitDepthFlagsKHR,
+        chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
         reference_picture_format: vk::Format
-    ) -> vk::VideoSessionKHR;
+    ) -> Result<vk::VideoSessionKHR, PhotonError>;
     fn bind_video_session_memory(
         instance: &Instance,
         pd: vk::PhysicalDevice,
@@ -62,6 +51,11 @@ pub trait Decoder {
         device: &ash::Device,
         extradata: &Vec<u8>,
         queue_family_index: u32,
+        codec_operation: vk::VideoCodecOperationFlagsKHR,
+        profile_idc: Option<impl VideoProfile>,
+        luma_depth: vk::VideoComponentBitDepthFlagsKHR,
+        chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
+        chroma_subsampling: vk::VideoChromaSubsamplingFlagsKHR,
         picture_format: vk::Format,
         reference_picture_format: vk::Format
     ) -> DecodingSession;
@@ -136,45 +130,63 @@ impl Decoder for Aura {
         instance: &Instance,
         device: &Device,
         video_queue_index: u32,
+        codec_operation: vk::VideoCodecOperationFlagsKHR,
+        profile_idc: Option<impl VideoProfile>,
+        chroma_subsampling: vk::VideoChromaSubsamplingFlagsKHR,
         picture_format: vk::Format,
+        luma_depth: vk::VideoComponentBitDepthFlagsKHR,
+        chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
         reference_picture_format: vk::Format
-    ) -> vk::VideoSessionKHR {
-        // Will be a general use function.
-        let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
-            .std_profile_idc(vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_MAIN);
-        let video_profile = vk::VideoProfileInfoKHR::default()
-            .video_codec_operation(vk::VideoCodecOperationFlagsKHR::DECODE_H264)
-            .chroma_subsampling(vk::VideoChromaSubsamplingFlagsKHR::TYPE_420)
-            .luma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8)
-            .chroma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8)
-            .push(&mut h264_profile);
-        let mut header_version = vk::ExtensionProperties::default();
-        let name = c"VK_STD_vulkan_video_codec_h264_decode";
-        for (dest, &src) in header_version
-            .extension_name
-            .iter_mut()
-            .zip(name.to_bytes_with_nul())
-        {
-            *dest = src as i8;
-        }
-        header_version.spec_version = vk::make_api_version(0, 1, 0, 0);
-        let create_info = vk::VideoSessionCreateInfoKHR::default()
-            .queue_family_index(video_queue_index)
-            .video_profile(&video_profile)
-            .picture_format(picture_format)
-            .reference_picture_format(reference_picture_format)
-            .max_coded_extent(vk::Extent2D {
-                width: 4096,
-                height: 4096,
-            })
-            .max_dpb_slots(16)
-            .max_active_reference_pictures(16)
-            .std_header_version(&header_version);
-
-        let loader = video_queue::Device::load(instance, device);
-        unsafe {
-            let session = loader.create_video_session(&create_info, None).unwrap();
-            session
+    ) -> Result<vk::VideoSessionKHR, PhotonError> {
+        if let Some(profile_idc) = profile_idc {
+            let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
+                .std_profile_idc(profile_idc.as_raw());
+            let mut h265_profile = vk::VideoDecodeH265ProfileInfoKHR::default()
+                .std_profile_idc(profile_idc.as_raw());
+            let mut av1_profile = vk::VideoDecodeAV1ProfileInfoKHR::default()
+                .std_profile(profile_idc.as_raw());
+            let mut video_profile = vk::VideoProfileInfoKHR::default()
+                .video_codec_operation(codec_operation)
+                .chroma_subsampling(chroma_subsampling)
+                .luma_bit_depth(luma_depth)
+                .chroma_bit_depth(chroma_depth);
+            if codec_operation == vk::VideoCodecOperationFlagsKHR::DECODE_H264 {
+                video_profile = video_profile.push(&mut h264_profile);
+            } else if codec_operation == vk::VideoCodecOperationFlagsKHR::DECODE_H265 {
+                video_profile = video_profile.push(&mut h265_profile);
+            } else if codec_operation == vk::VideoCodecOperationFlagsKHR::DECODE_AV1 {
+                video_profile = video_profile.push(&mut av1_profile)
+            }
+            let mut header_version = vk::ExtensionProperties::default();
+            let name = c"VK_STD_vulkan_video_codec_h264_decode";
+            for (dest, &src) in header_version
+                .extension_name
+                .iter_mut()
+                .zip(name.to_bytes_with_nul())
+            {
+                *dest = src as i8;
+            }
+            header_version.spec_version = vk::make_api_version(0, 1, 0, 0);
+            let create_info = vk::VideoSessionCreateInfoKHR::default()
+                .queue_family_index(video_queue_index)
+                .video_profile(&video_profile)
+                .picture_format(picture_format)
+                .reference_picture_format(reference_picture_format)
+                .max_coded_extent(vk::Extent2D {
+                    width: 4096,
+                    height: 4096,
+                })
+                .max_dpb_slots(16)
+                .max_active_reference_pictures(16)
+                .std_header_version(&header_version);
+            
+            let loader = video_queue::Device::load(instance, device);
+            unsafe {
+                let session = loader.create_video_session(&create_info, None)?;
+                Ok(session)
+            }
+        } else {
+            Err(PhotonError::NoProfileIndicator)
         }
     }
 
@@ -326,13 +338,25 @@ impl Decoder for Aura {
         device: &ash::Device,
         extradata: &Vec<u8>,
         queue_family_index: u32,
+        codec_operation: vk::VideoCodecOperationFlagsKHR,
+        profile_idc: Option<impl VideoProfile>,
+        luma_depth: vk::VideoComponentBitDepthFlagsKHR,
+        chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
+        chroma_subsampling: vk::VideoChromaSubsamplingFlagsKHR,
         picture_format: vk::Format,
         reference_picture_format: vk::Format
     ) -> DecodingSession {
         let video_loader = video_queue::Device::load(instance, device);
         let decode_loader = VideoDecodeLoader::load(instance, device);
 
-        let session = Aura::create_video_session(instance, device, queue_family_index, picture_format, reference_picture_format);
+        let session = Aura::create_video_session(instance, device, queue_family_index, 
+            codec_operation, 
+            profile_idc, 
+            chroma_subsampling, 
+            picture_format, 
+            luma_depth, 
+            chroma_depth, 
+            reference_picture_format).unwrap();
 
         let session_parameters = unsafe {
             Aura::create_h264_session_parameters(device, &video_loader, extradata, session)

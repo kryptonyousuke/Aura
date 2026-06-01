@@ -178,9 +178,7 @@ impl H264Decoder for Aura {
                         }
                     };
                     log::debug!(
-                        "Slice Header successfully decoded. FrameNum: {}, POC: {}",
-                        real_frame_num,
-                        real_poc
+                        "Slice Header successfully decoded. FrameNum: {real_frame_num}, POC: {real_poc}",
                     );
                 } else {
                     log::warn!("Failed to parse slice_header, using linear fallback.");
@@ -434,10 +432,10 @@ impl H264Decoder for Aura {
         extradata: &[u8],
         session: vk::VideoSessionKHR,
     ) -> vk::VideoSessionParametersKHR {
-        let std_sps = crate::vulkan::decoders::h264_parser::parse_sps(extradata)
+        let std_sps = super::h264_parser::parse_sps(extradata)
             .expect("Failed to parse SPS");
 
-        let std_pps = crate::vulkan::decoders::h264_parser::parse_pps(extradata)
+        let std_pps = super::h264_parser::parse_pps(extradata)
             .expect("Failed to parse PPS");
         log::info!(
             "Resolution: {}x{}",

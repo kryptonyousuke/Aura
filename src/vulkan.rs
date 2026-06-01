@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Krypton Yousuke
 // Licensed under the MIT or Apache-2.0 licenses, at your choice.
 pub mod debug;
-pub mod decoders;
+pub mod photon;
 pub mod pipeline;
 pub mod sampler;
 pub mod shaders;

@@ -1,6 +1,8 @@
 use super::debug;
 use crate::video::video_context::VideoContext;
-use crate::vulkan::decoders::decoder::{Decoder, DecodingSession, SupportedCodecs, DecodeExtensions};
+use crate::vulkan::photon::decoder::{Decoder, DecodingSession};
+use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
+use crate::vulkan::photon::types::{DecodeExtensions, SupportedCodecs, VideoCodecsProfiles};
 use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::sampler::Sampler;
 use crate::vulkan::shaders::Shaders;
@@ -8,20 +10,18 @@ use ash::{
     Entry, Instance,
     khr::{video_decode_queue::Device as VideoDecodeLoader, video_queue},
     vk,
-    vk::{DebugUtilsMessengerEXT, TaggedStructure}
+    vk::{DebugUtilsMessengerEXT, TaggedStructure},
 };
-use ffmpeg_next::ffi::{AVColorPrimaries, AVColorRange, AVColorSpace};
+use ffmpeg_next::ffi::AVCodecID;
+use ffmpeg_next::ffi::{AVColorRange, AVPixelFormat};
 use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
-use anyhow::Result;
-use std::ffi::{CStr, c_char};
-
+use std::ffi::CStr;
+use std::i32;
 
 pub const SWAPHAIN_IMAGE_COUNT: u8 = 4;
 pub const FRAMES_IN_FLIGHT: u8 = SWAPHAIN_IMAGE_COUNT - 1;
 const DPB_POOL_SIZE: usize = 16;
 
-
-#[allow(dead_code)]
 pub struct Aura {
     pub _entry: Entry,
     pub _instance: Instance,
@@ -31,7 +31,6 @@ pub struct Aura {
     pub _graphics_queue_family_index: u32,
     pub _session_memories: Vec<vk::DeviceMemory>,
 
-    
     pub physical_device: vk::PhysicalDevice,
     pub device: ash::Device,
 
@@ -42,14 +41,14 @@ pub struct Aura {
     pub bitstream_sizes: [u32; FRAMES_IN_FLIGHT as usize],
     pub video_loader: video_queue::Device,
     pub decode_loader: VideoDecodeLoader,
-    
+
     pub graphics_queue: vk::Queue,
     pub video_queue: vk::Queue,
     pub surface: vk::SurfaceKHR,
     pub surface_loader: ash::khr::surface::Instance,
     pub video_color_range: vk::SamplerYcbcrRange,
     pub session_parameters: vk::VideoSessionParametersKHR,
-    
+
     /*
      * My VCN 2.0 doesn't support a single pool for dst and dpb at the same time.
      * This should be changed in the future.
@@ -66,8 +65,7 @@ pub struct Aura {
     pub graphics_command_buffers: Vec<vk::CommandBuffer>,
     pub video_command_pool: vk::CommandPool,
     pub video_command_buffers: Vec<vk::CommandBuffer>,
-    
-    
+
     pub swapchain_loader: ash::khr::swapchain::Device,
     pub swapchain: vk::SwapchainKHR,
     pub swapchain_images: Vec<vk::Image>,
@@ -77,7 +75,7 @@ pub struct Aura {
 
     pub present_complete_semaphores: [vk::Semaphore; SWAPHAIN_IMAGE_COUNT as usize],
     pub render_complete_semaphores: [vk::Semaphore; SWAPHAIN_IMAGE_COUNT as usize],
-    pub graphics_complete_semaphores: [vk::Semaphore;  SWAPHAIN_IMAGE_COUNT as usize],
+    pub graphics_complete_semaphores: [vk::Semaphore; SWAPHAIN_IMAGE_COUNT as usize],
     pub render_fences: [vk::Fence; FRAMES_IN_FLIGHT as usize],
 
     pub pipeline_layout: vk::PipelineLayout,
@@ -92,14 +90,17 @@ pub struct Aura {
     pub scissor: vk::Rect2D,
     pub video_extent: vk::Extent2D,
     pub frames_in_flight: u8,
-    supported_decoders: SupportedCodecs,
+    pub supported_decoders: SupportedCodecs,
 }
 
 impl Aura {
     // Constants
 
-    pub fn new(window: &winit::window::Window, extradata: &Vec<u8>, v_ctx: Option<&VideoContext>) -> Self {
-
+    pub fn new(
+        window: &winit::window::Window,
+        extradata: &Vec<u8>,
+        v_ctx: Option<&VideoContext>,
+    ) -> Self {
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
         match unsafe { entry.try_enumerate_instance_version().unwrap() } {
             Some(version) => {
@@ -124,7 +125,7 @@ impl Aura {
                 .iter()
                 .map(|&ptr| unsafe { CStr::from_ptr(ptr) })
                 .collect();
-        required_instance_extensions.push(ash::ext::debug_utils::NAME);
+        required_instance_extensions.push(vk::EXT_DEBUG_UTILS_NAME);
         required_instance_extensions.push(vk::KHR_SURFACE_MAINTENANCE1_NAME);
         required_instance_extensions.push(vk::KHR_GET_SURFACE_CAPABILITIES2_NAME);
         Self::log_instance_extensions(&entry, &required_instance_extensions);
@@ -241,28 +242,171 @@ impl Aura {
                 match (*raw_params).color_range {
                     AVColorRange::AVCOL_RANGE_MPEG => vk::SamplerYcbcrRange::ITU_NARROW,
                     AVColorRange::AVCOL_RANGE_JPEG => vk::SamplerYcbcrRange::ITU_FULL,
-                    _ => vk::SamplerYcbcrRange::ITU_NARROW
+                    _ => vk::SamplerYcbcrRange::ITU_NARROW,
                 }
             }
-        } else { vk::SamplerYcbcrRange::ITU_NARROW };
+        } else {
+            vk::SamplerYcbcrRange::ITU_NARROW
+        };
+        let video_codec: vk::VideoCodecOperationFlagsKHR = if let Some(v_ctx) = v_ctx {
+            unsafe {
+                let raw_params = v_ctx.params.as_ptr();
+                match (*raw_params).codec_id {
+                    AVCodecID::AV_CODEC_ID_H264 => vk::VideoCodecOperationFlagsKHR::DECODE_H264,
+                    AVCodecID::AV_CODEC_ID_HEVC => vk::VideoCodecOperationFlagsKHR::DECODE_H265,
+                    AVCodecID::AV_CODEC_ID_AV1 => vk::VideoCodecOperationFlagsKHR::DECODE_AV1,
+                    _ => vk::VideoCodecOperationFlagsKHR::NONE,
+                }
+            }
+        } else {
+            vk::VideoCodecOperationFlagsKHR::NONE
+        };
+
+        let (video_chroma_flags, video_luma_depth, video_chroma_depth) = if let Some(v_ctx) = v_ctx {
+            unsafe {
+                let raw_params = v_ctx.params.as_ptr();
+                log::debug!("Pixel format indicator: {}", (*raw_params).format);
+                match (*raw_params).format {
+                    format if format == AVPixelFormat::AV_PIX_FMT_YUV420P as i32 || 
+                        format == AVPixelFormat::AV_PIX_FMT_YUVJ420P as i32 ||
+                        format == AVPixelFormat::AV_PIX_FMT_NV12 as i32 ||
+                        format == AVPixelFormat::AV_PIX_FMT_P010LE as i32 => {
+                            (
+                                vk::VideoChromaSubsamplingFlagsKHR::TYPE_420,
+                                vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
+                                vk::VideoComponentBitDepthFlagsKHR::TYPE_8
+                            )
+                    }
+                    format if format == AVPixelFormat::AV_PIX_FMT_YUV422P as i32 => {
+                        (
+                            vk::VideoChromaSubsamplingFlagsKHR::TYPE_422,
+                            vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
+                            vk::VideoComponentBitDepthFlagsKHR::TYPE_8
+                        )
+                    }
+                    format if format == AVPixelFormat::AV_PIX_FMT_YUV444P as i32 => {
+                        (
+                            vk::VideoChromaSubsamplingFlagsKHR::TYPE_444,
+                            vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
+                            vk::VideoComponentBitDepthFlagsKHR::TYPE_8
+                        )
+                    }
+                    _ => (
+                        vk::VideoChromaSubsamplingFlagsKHR::INVALID,
+                        vk::VideoComponentBitDepthFlagsKHR::INVALID,
+                        vk::VideoComponentBitDepthFlagsKHR::INVALID
+                    )
+                }
+            }
+        } else {
+            (
+                vk::VideoChromaSubsamplingFlagsKHR::INVALID,
+                vk::VideoComponentBitDepthFlagsKHR::INVALID,
+                vk::VideoComponentBitDepthFlagsKHR::INVALID
+            )
+        };
+        
+
+        let video_profile_indicator = if let Some(v_ctx) = v_ctx {
+            unsafe {
+                let raw_params = v_ctx.params.as_ptr();
+                match (*raw_params).profile {
+                    // H264 profiles
+                    profile if profile == VideoCodecsProfiles::H264Profiles::Baseline as i32 => {
+                        VideoCodecsProfiles::UnifiedVideoProfile::H264(
+                            VideoCodecsProfiles::H264Profiles::Baseline,
+                        )
+                    }
+                    profile if profile == VideoCodecsProfiles::H264Profiles::Main as i32 => {
+                        VideoCodecsProfiles::UnifiedVideoProfile::H264(
+                            VideoCodecsProfiles::H264Profiles::Main,
+                        )
+                    }
+                    profile if profile == VideoCodecsProfiles::H264Profiles::High as i32 => {
+                        VideoCodecsProfiles::UnifiedVideoProfile::H264(
+                            VideoCodecsProfiles::H264Profiles::High,
+                        )
+                    }
+                    profile if profile == VideoCodecsProfiles::H264Profiles::High444 as i32 => {
+                        VideoCodecsProfiles::UnifiedVideoProfile::H264(
+                            VideoCodecsProfiles::H264Profiles::High444,
+                        )
+                    }
+
+                    // H265 profiles
+                    profile if profile == VideoCodecsProfiles::H265Profiles::Main as i32 => {
+                        VideoCodecsProfiles::UnifiedVideoProfile::H265(
+                            VideoCodecsProfiles::H265Profiles::Main,
+                        )
+                    }
+                    profile if profile == VideoCodecsProfiles::H265Profiles::Main10 as i32 => {
+                        VideoCodecsProfiles::UnifiedVideoProfile::H265(
+                            VideoCodecsProfiles::H265Profiles::Main10,
+                        )
+                    }
+
+                    // AV1 profiles
+                    profile if profile == VideoCodecsProfiles::AV1Profiles::Main as i32 => {
+                        VideoCodecsProfiles::UnifiedVideoProfile::AV1(
+                            VideoCodecsProfiles::AV1Profiles::Main,
+                        )
+                    }
+                    profile if profile == VideoCodecsProfiles::AV1Profiles::High as i32 => {
+                        VideoCodecsProfiles::UnifiedVideoProfile::AV1(
+                            VideoCodecsProfiles::AV1Profiles::High,
+                        )
+                    }
+                    profile if profile == VideoCodecsProfiles::AV1Profiles::Professional as i32 => {
+                        VideoCodecsProfiles::UnifiedVideoProfile::AV1(
+                            VideoCodecsProfiles::AV1Profiles::Professional,
+                        )
+                    }
+                    _ => VideoCodecsProfiles::UnifiedVideoProfile::Unknown(
+                        VideoCodecsProfiles::UnknownProfile::Unknown,
+                    ),
+                }
+            }
+        } else {
+            VideoCodecsProfiles::UnifiedVideoProfile::Unknown(
+                VideoCodecsProfiles::UnknownProfile::Unknown,
+            )
+        };
+
+        let video_height: i32 = if let Some(v_ctx) = v_ctx {
+            unsafe {
+                let raw_params = v_ctx.params.as_ptr();
+                (*raw_params).height
+            }
+        } else {
+            1920
+        };
+
+        let video_width: i32 = if let Some(v_ctx) = v_ctx {
+            unsafe {
+                let raw_params = v_ctx.params.as_ptr();
+                (*raw_params).width
+            }
+        } else {
+            1080
+        };
         let video_extent = vk::Extent2D {
-            width: 1920,
-            height: 1080u32.div_ceil(16) * 16, // h264 macroblocks are multiple of 16, 1088 is needed.
+            // keeps multiple of 16 for now just for h264 compatibility
+            width: (video_width as u32).div_ceil(16) * 16,
+            height: (video_height as u32).div_ceil(16) * 16,
         };
 
         // Ycbcr Sampler
-        let ycbcr_conversion =
-            unsafe { Self::create_ycbcr_conversion(&device, dpb_and_dst_format, video_color_range) };
-        let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
-            .std_profile_idc(vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_MAIN);
+        let ycbcr_conversion = unsafe {
+            Self::create_ycbcr_conversion(&device, dpb_and_dst_format, video_color_range)
+        };
+        let mut video_profile_info = vk::VideoDecodeH264ProfileInfoKHR::default()
+            .std_profile_idc(video_profile_indicator.as_raw());
         let mut video_profile = vk::VideoProfileInfoKHR::default()
-            .push(&mut h264_profile)
-            .video_codec_operation(vk::VideoCodecOperationFlagsKHR::DECODE_H264)
-            .chroma_subsampling(vk::VideoChromaSubsamplingFlagsKHR::TYPE_420)
-            .luma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8)
-            .chroma_bit_depth(vk::VideoComponentBitDepthFlagsKHR::TYPE_8);
-
-
+            .push(&mut video_profile_info)
+            .video_codec_operation(video_codec)
+            .chroma_subsampling(video_chroma_flags)
+            .luma_bit_depth(video_luma_depth)
+            .chroma_bit_depth(video_chroma_depth);
 
         // Logs
         log::info!(
@@ -290,9 +434,6 @@ impl Aura {
             "VIDEO_DECODE_DST_KHR",
         );
 
-
-        
-
         let DecodingSession {
             session,
             _session_memories,
@@ -305,8 +446,13 @@ impl Aura {
             &device,
             extradata,
             decode_queue_family_index,
+            video_codec,
+            Some(video_profile_indicator),
+            vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
+            vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
+            vk::VideoChromaSubsamplingFlagsKHR::TYPE_420,
             dpb_and_dst_format,
-            dpb_and_dst_format
+            dpb_and_dst_format,
         );
         let mut bitstream_buffers = [vk::Buffer::null(); FRAMES_IN_FLIGHT as usize];
         let mut bitstream_memories = [vk::DeviceMemory::null(); FRAMES_IN_FLIGHT as usize];
@@ -386,24 +532,29 @@ impl Aura {
             ycbcr_conversion,
             DPB_POOL_SIZE,
             dpb_and_dst_format,
-            video_extent
+            video_extent,
         );
         let semaphore_create_info = vk::SemaphoreCreateInfo::default();
         let frames_in_flight_fences_info =
             vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
-        let mut present_complete_semaphores = [vk::Semaphore::null(); SWAPHAIN_IMAGE_COUNT as usize];
+        let mut present_complete_semaphores =
+            [vk::Semaphore::null(); SWAPHAIN_IMAGE_COUNT as usize];
         let mut render_complete_semaphores = [vk::Semaphore::null(); SWAPHAIN_IMAGE_COUNT as usize];
-        let mut graphics_complete_semaphores = [vk::Semaphore::null(); SWAPHAIN_IMAGE_COUNT as usize];
+        let mut graphics_complete_semaphores =
+            [vk::Semaphore::null(); SWAPHAIN_IMAGE_COUNT as usize];
 
         for i in 0..swapchain_images.len() {
             unsafe {
-                present_complete_semaphores[i] =
-                    device.create_semaphore(&semaphore_create_info, None).unwrap();
-                render_complete_semaphores[i] =
-                    device.create_semaphore(&semaphore_create_info, None).unwrap();
-                graphics_complete_semaphores[i] = 
-                    device.create_semaphore(&semaphore_create_info, None).unwrap();
+                present_complete_semaphores[i] = device
+                    .create_semaphore(&semaphore_create_info, None)
+                    .unwrap();
+                render_complete_semaphores[i] = device
+                    .create_semaphore(&semaphore_create_info, None)
+                    .unwrap();
+                graphics_complete_semaphores[i] = device
+                    .create_semaphore(&semaphore_create_info, None)
+                    .unwrap();
             }
         }
 
@@ -480,7 +631,6 @@ impl Aura {
             session_parameters: session_parameters,
             video_color_range: video_color_range,
 
-
             graphics_command_pool: graphics_command_pool,
             graphics_command_buffers: graphics_command_buffers,
             swapchain_loader: swapchain_loader,
@@ -499,7 +649,7 @@ impl Aura {
             pipeline: pipeline,
             video_sampler: video_sampler,
             descriptor_set_layouts: descriptor_set_layouts,
-            
+
             dpb_pool: dpb_pool,
             dst_pool: dst_pool,
             dpb_and_dst_format: dpb_and_dst_format,
@@ -549,11 +699,11 @@ impl Aura {
                         unsafe {
                             let ext_cstr = CStr::from_ptr(ext_name.extension_name.as_ptr());
                             if ext_cstr == DecodeExtensions::H264 {
-                                supported_codecs.h264 = true
+                                supported_codecs.h264 = true;
                             } else if ext_cstr == DecodeExtensions::H265 {
-                                supported_codecs.h265 = true
+                                supported_codecs.h265 = true;
                             } else if ext_cstr == DecodeExtensions::AV1 {
-                                supported_codecs.av1 = true
+                                supported_codecs.av1 = true;
                             };
                         }
                     }
