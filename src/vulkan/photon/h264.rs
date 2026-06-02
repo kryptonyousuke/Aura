@@ -51,7 +51,8 @@ impl H264Decoder for Aura {
                 .unwrap();
             let () = self
                 .device
-                .reset_fences(&[self.render_fences[swapchain_sync_idx]]).unwrap();
+                .reset_fences(&[self.render_fences[swapchain_sync_idx]])
+                .unwrap();
             let (swapchain_available_image_idx, _is_suboptimal) = self
                 .swapchain_loader
                 .acquire_next_image(

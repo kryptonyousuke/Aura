@@ -42,7 +42,8 @@ impl ApplicationHandler for App {
             let video_stream_index = input_stream.index();
             let params = input_stream.parameters();
             let rational_tb = input_stream.time_base();
-            let time_base_f64 = f64::from(rational_tb.numerator()) / f64::from(rational_tb.denominator());
+            let time_base_f64 =
+                f64::from(rational_tb.numerator()) / f64::from(rational_tb.denominator());
             let clock = VideoClock::new(time_base_f64);
             let extradata = unsafe {
                 let raw_params = params.as_ptr();
@@ -102,7 +103,9 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 if let (Some(aura), Some(v_ctx)) = (&mut self.aura, &mut self.video_ctx) {
                     if let Some((stream, packet)) = v_ctx.ictx.packets().next() {
-                        if stream.index() == v_ctx.video_stream_index && let Some(data) = packet.data() {
+                        if stream.index() == v_ctx.video_stream_index
+                            && let Some(data) = packet.data()
+                        {
                             let conversion = avcc_to_annexb(data, v_ctx.nalu_length_size);
                             match conversion {
                                 Ok((annexb, slice_offsets)) => {
@@ -110,18 +113,16 @@ impl ApplicationHandler for App {
                                         && let Some(wait_duration) =
                                             v_ctx.clock.time_till_next_frame(pts)
                                     {
-                                            std::thread::sleep(wait_duration);
+                                        std::thread::sleep(wait_duration);
                                     }
-                                    let std_sps =
-                                        crate::vulkan::photon::h264_parser::parse_sps(
-                                            &v_ctx.extradata,
-                                        )
-                                        .expect("Failed to parse SPS");
-                                    let _std_pps =
-                                        crate::vulkan::photon::h264_parser::parse_pps(
-                                            &v_ctx.extradata,
-                                        )
-                                        .expect("Failed to parse PPS");
+                                    let std_sps = crate::vulkan::photon::h264_parser::parse_sps(
+                                        &v_ctx.extradata,
+                                    )
+                                    .expect("Failed to parse SPS");
+                                    let _std_pps = crate::vulkan::photon::h264_parser::parse_pps(
+                                        &v_ctx.extradata,
+                                    )
+                                    .expect("Failed to parse PPS");
                                     aura.decode_frame(
                                         &annexb,
                                         &slice_offsets,

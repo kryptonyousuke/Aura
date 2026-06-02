@@ -320,10 +320,12 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
     std_sps.bit_depth_luma_minus8 = u8::try_from(bit_depth_luma_minus8).unwrap();
     std_sps.bit_depth_chroma_minus8 = u8::try_from(bit_depth_chroma_minus8).unwrap();
     std_sps.log2_max_frame_num_minus4 = u8::try_from(log2_max_frame_num_minus4).unwrap();
-    std_sps.log2_max_pic_order_cnt_lsb_minus4 = u8::try_from(log2_max_pic_order_cnt_lsb_minus4).unwrap();
+    std_sps.log2_max_pic_order_cnt_lsb_minus4 =
+        u8::try_from(log2_max_pic_order_cnt_lsb_minus4).unwrap();
     std_sps.offset_for_non_ref_pic = offset_for_non_ref_pic;
     std_sps.offset_for_top_to_bottom_field = offset_for_top_to_bottom_field;
-    std_sps.num_ref_frames_in_pic_order_cnt_cycle = u8::try_from(num_ref_frames_in_pic_order_cnt_cycle).unwrap();
+    std_sps.num_ref_frames_in_pic_order_cnt_cycle =
+        u8::try_from(num_ref_frames_in_pic_order_cnt_cycle).unwrap();
     std_sps.max_num_ref_frames = u8::try_from(max_num_ref_frames).unwrap();
     std_sps.pic_width_in_mbs_minus1 = pic_width_in_mbs_minus1;
     std_sps.pic_height_in_map_units_minus1 = pic_height_in_map_units_minus1;
@@ -423,8 +425,10 @@ pub fn parse_pps(extradata: &[u8]) -> Option<vk::native::StdVideoH264PicturePara
     std_pps.flags = pps_flags;
     std_pps.pic_parameter_set_id = u8::try_from(pic_parameter_set_id).unwrap();
     std_pps.seq_parameter_set_id = u8::try_from(seq_parameter_set_id).unwrap();
-    std_pps.num_ref_idx_l0_default_active_minus1 = u8::try_from(num_ref_idx_l0_default_active_minus1).unwrap();
-    std_pps.num_ref_idx_l1_default_active_minus1 = u8::try_from(num_ref_idx_l1_default_active_minus1).unwrap();
+    std_pps.num_ref_idx_l0_default_active_minus1 =
+        u8::try_from(num_ref_idx_l0_default_active_minus1).unwrap();
+    std_pps.num_ref_idx_l1_default_active_minus1 =
+        u8::try_from(num_ref_idx_l1_default_active_minus1).unwrap();
 
     std_pps.weighted_bipred_idc = match weighted_bipred_idc {
         0 => vk::native::StdVideoH264WeightedBipredIdc_STD_VIDEO_H264_WEIGHTED_BIPRED_IDC_DEFAULT,
