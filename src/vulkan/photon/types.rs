@@ -1,4 +1,6 @@
 //! # Structs and Enums used as abstraction layers for vulkan decoding pipeline.
+
+
 use std::ffi::CStr;
 pub struct DecodeExtensions;
 use thiserror::Error;
@@ -9,7 +11,7 @@ impl DecodeExtensions {
 }
 
 
-/// Describes which 
+/// Describes which codecs are supported by the physical device.
 pub struct SupportedCodecs {
     pub h264: bool,
     pub h265: bool,
@@ -120,7 +122,8 @@ pub mod VideoCodecsProfiles {
 pub enum PhotonError {
     #[error("Can't find a valid video profile.")]
     NoProfileIndicator,
-    
+    #[error("Invalid codec operation.")]
+    InvalidCodecOperation,
     #[error("Vulkan driver error: {0:?}")]
     VulkanError(#[from] ash::vk::Result),
 }

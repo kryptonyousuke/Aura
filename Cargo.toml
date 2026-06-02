@@ -15,17 +15,18 @@ overflow-checks = false
 [dependencies]
 winit = "0.30.13"
 ash-window = { git = "https://github.com/ash-rs/ash", package = "ash-window" }
-clap = { version = "4", features = ["derive"] }
-ash = { git = "https://github.com/ash-rs/ash" }
-gpu-allocator = { version = "0.28.0", features = ["vulkan"] }
+clap = { version = "4.6.1", features = ["derive"] }
+ash = { git = "https://github.com/ash-rs/ash", package = "ash" }
+# gpu-allocator = { version = "0.28.0", features = ["vulkan"] }
 raw-window-handle = "0.6.2"
 ffmpeg-next = "8.1.0"
 anyhow = "1.0.102"
 rayon = "1.12.0"
-log = { version = "0.4", features = ["release_max_level_off"]}
+log = { version = "0.4.30", features = ["release_max_level_off"]}
 pretty_env_logger = "0.5"
 owo-colors = "4.3.0"
 thiserror = "2.0.18"
 
 [build-dependencies]
 shaderc = "0.10.1"
+

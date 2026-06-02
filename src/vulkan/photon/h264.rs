@@ -1,5 +1,6 @@
 //! # H264 decoder
 //! Deals with the logic of the decoding pípeline.
+
 use super::decoder::Decoder;
 use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::vk_init::Aura;
@@ -24,7 +25,7 @@ pub trait H264Decoder {
     ) -> vk::VideoSessionParametersKHR;
 }
 impl H264Decoder for Aura {
-    /// Decode a h264 frame.
+    /// Decodes a h264 frame.
     fn decode_frame(
         &mut self,
         bitstream_data: &[u8],
@@ -42,7 +43,7 @@ impl H264Decoder for Aura {
             (self.current_frame_count_idx % self.frames_in_flight as usize) as usize;
         let aligned_size = self.bitstream_sizes[swapchain_sync_idx];
         unsafe {
-            self.upload_bitstream_packet(bitstream_data, swapchain_sync_idx); // Upload the current bitstream buffer (RAM) into a vulkan buffer (VRAM).
+            self.upload_bitstream_packet(bitstream_data, swapchain_sync_idx);
 
             log::debug!("swapchain_sync_idx: {}", swapchain_sync_idx);
             let _ = self

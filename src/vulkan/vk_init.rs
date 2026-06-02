@@ -734,23 +734,6 @@ impl Aura {
         );
         std::process::abort();
     }
-
-    pub fn find_memory_type(
-        instance: &Instance,
-        pdevice: vk::PhysicalDevice,
-        type_filter: u32,
-        props: vk::MemoryPropertyFlags,
-    ) -> u32 {
-        let mem_props = unsafe { instance.get_physical_device_memory_properties(pdevice) };
-        for i in 0..mem_props.memory_type_count {
-            if (type_filter & (1 << i)) != 0
-                && (mem_props.memory_types[i as usize].property_flags & props) == props
-            {
-                return i;
-            }
-        }
-        0
-    }
 }
 
 impl Drop for Aura {
