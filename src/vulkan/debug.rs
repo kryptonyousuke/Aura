@@ -56,7 +56,7 @@ pub extern "system" fn vulkan_debug_callback(
         "Details:".bright_black().bold()
     );
     for line in raw_message.lines() {
-        println!("  {}", line);
+        println!("  {line}");
     }
 
     println!("{}", "─".repeat(80).dimmed());
@@ -83,8 +83,7 @@ impl Aura {
                 .get_physical_device_video_format_properties_len(physical_device, &format_info)
         };
         log::info!(
-            "-------- GPU's supported formats for {} ---------",
-            identifier
+            "-------- GPU's supported formats for {identifier} ---------",
         );
 
         if supported_formats_len_result.is_ok() {
@@ -102,7 +101,7 @@ impl Aura {
             };
             if result.is_ok() {
                 for (i, prop) in supported_formats.iter().enumerate() {
-                    log::info!("- Config #{}:", i);
+                    log::info!("- Config #{i}:");
                     log::info!("Image Type: {:?}", prop.image_type);
                     log::info!("Format: {:?}", prop.format);
                     log::info!("Tiling: {:?}", prop.image_tiling);
@@ -130,7 +129,7 @@ impl Aura {
         }
         log::info!("------------ Required Instance Extensions -----------");
         for extension_c_str in required_instance_extensions {
-            log::info!("Extension: {:#?}", extension_c_str);
+            log::info!("Extension: {extension_c_str:#?}");
         }
         log::info!("------------------------------------------------------");
     }

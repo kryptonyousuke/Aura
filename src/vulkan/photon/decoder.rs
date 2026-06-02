@@ -1,16 +1,18 @@
 //! # Decoder implementation.
 //! Provides required functions for any decoder instance.
 
+
 use std::ffi::CStr;
 
-use super::types::PhotonError;
-use crate::vulkan::photon::h264::H264Decoder;
 use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
+use crate::vulkan::photon::h264::H264Decoder;
 use crate::vulkan::vk_init::Aura;
-use anyhow::Result;
+use super::types::PhotonError;
 use ash::khr::video_queue;
 use ash::vk::{TaggedStructure, make_api_version};
-use ash::{Device, Instance, khr::video_decode_queue::Device as VideoDecodeLoader, vk};
+use ash::{Device, Instance, vk, khr::{video_decode_queue::Device as VideoDecodeLoader}};
+use anyhow::Result;
+
 
 pub struct DecodingSession {
     pub(crate) session: vk::VideoSessionKHR,
@@ -21,7 +23,6 @@ pub struct DecodingSession {
 }
 
 pub trait Decoder {
-    /// Creates a video session.
     fn create_video_session(
         instance: &Instance,
         device: &Device,
@@ -32,16 +33,15 @@ pub trait Decoder {
         picture_format: vk::Format,
         luma_depth: vk::VideoComponentBitDepthFlagsKHR,
         chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
-        reference_picture_format: vk::Format,
+        reference_picture_format: vk::Format
     ) -> Result<vk::VideoSessionKHR, PhotonError>;
-    /// Checks wether or not a memory type is supported and returns its index.
+    /// Checks wether or not a memmory type is supported and returns its index.
     fn find_memory_type_index(
         instance: &Instance,
         pdevice: vk::PhysicalDevice,
         type_filter: u32,
         props: vk::MemoryPropertyFlags,
     ) -> u32;
-    /// Allocates the memory buffers of the video session.
     fn allocate_video_session_memories(
         instance: &Instance,
         pd: vk::PhysicalDevice,
@@ -49,7 +49,7 @@ pub trait Decoder {
         loader: &video_queue::Device,
         session: vk::VideoSessionKHR,
     ) -> Vec<vk::DeviceMemory>;
-    /// Creates a memory buffer with VIDEO_DECODE_SRC_KHR usage flag and HOST_VISIBLE | HOST_COHERENT property flags.
+    /// Creates a memory buffer with `VIDEO_DECODE_SRC_KHR` usage flag and `HOST_VISIBLE` | `HOST_COHERENT` property flags.
     fn create_bitstream_buffer(
         instance: &Instance,
         video_instance_ext: &video_queue::Instance,
@@ -60,12 +60,12 @@ pub trait Decoder {
 
     /// Uploads the current bitstream buffer (RAM) into a vulkan buffer (VRAM).
     fn upload_bitstream_packet(&self, data: &[u8], swapchain_sync_idx: usize);
-    /// Configure the video decoder.
+    
     fn setup_decoder(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
         device: &ash::Device,
-        extradata: &Vec<u8>,
+        extradata: &[u8],
         queue_family_index: u32,
         codec_operation: vk::VideoCodecOperationFlagsKHR,
         profile_idc: Option<impl VideoProfile>,
@@ -73,7 +73,7 @@ pub trait Decoder {
         chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
         chroma_subsampling: vk::VideoChromaSubsamplingFlagsKHR,
         picture_format: vk::Format,
-        reference_picture_format: vk::Format,
+        reference_picture_format: vk::Format
     ) -> DecodingSession;
     fn create_dpb_dst_pool(
         instance: &Instance,
@@ -83,12 +83,11 @@ pub trait Decoder {
         ycbcr_conversion: vk::SamplerYcbcrConversion,
         dpb_pool_size: usize,
         dpb_format: vk::Format,
-        video_extent: vk::Extent2D,
+        video_extent: vk::Extent2D
     ) -> (
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
     );
-
     unsafe fn acquire_image_dst_on_graphic(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
@@ -148,17 +147,17 @@ impl Decoder for Aura {
         picture_format: vk::Format,
         luma_depth: vk::VideoComponentBitDepthFlagsKHR,
         chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
-        reference_picture_format: vk::Format,
+        reference_picture_format: vk::Format
     ) -> Result<vk::VideoSessionKHR, PhotonError> {
         if let Some(profile_idc) = profile_idc {
             let extension_name: &CStr;
-
-            let mut h264_profile =
-                vk::VideoDecodeH264ProfileInfoKHR::default().std_profile_idc(profile_idc.as_raw());
-            let mut h265_profile =
-                vk::VideoDecodeH265ProfileInfoKHR::default().std_profile_idc(profile_idc.as_raw());
-            let mut av1_profile =
-                vk::VideoDecodeAV1ProfileInfoKHR::default().std_profile(profile_idc.as_raw());
+            
+            let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
+                .std_profile_idc(profile_idc.as_raw());
+            let mut h265_profile = vk::VideoDecodeH265ProfileInfoKHR::default()
+                .std_profile_idc(profile_idc.as_raw());
+            let mut av1_profile = vk::VideoDecodeAV1ProfileInfoKHR::default()
+                .std_profile(profile_idc.as_raw());
             let mut video_profile = vk::VideoProfileInfoKHR::default()
                 .video_codec_operation(codec_operation)
                 .chroma_subsampling(chroma_subsampling)
@@ -174,12 +173,11 @@ impl Decoder for Aura {
                 video_profile = video_profile.push(&mut av1_profile);
                 extension_name = c"VK_STD_vulkan_video_codec_av1_decode";
             } else {
-                return Err(PhotonError::InvalidCodecOperation);
+                return Err(PhotonError::InvalidCodecOperation)
             }
             let header_version = vk::ExtensionProperties::default()
                 .spec_version(make_api_version(0, 1, 0, 0))
-                .extension_name(extension_name)
-                .unwrap();
+                .extension_name(extension_name).unwrap();
             let create_info = vk::VideoSessionCreateInfoKHR::default()
                 .queue_family_index(video_queue_index)
                 .video_profile(&video_profile)
@@ -192,7 +190,7 @@ impl Decoder for Aura {
                 .max_dpb_slots(16)
                 .max_active_reference_pictures(16)
                 .std_header_version(&header_version);
-
+            
             let loader = video_queue::Device::load(instance, device);
             unsafe {
                 let session = loader.create_video_session(&create_info, None)?;
@@ -233,7 +231,7 @@ impl Decoder for Aura {
                     .get_video_session_memory_requirements_len(session)
                     .unwrap()
             ];
-            let _ = loader
+            let () = loader
                 .get_video_session_memory_requirements(session, &mut memory_requirements)
                 .unwrap();
             let mut memories = Vec::new();
@@ -261,7 +259,7 @@ impl Decoder for Aura {
                         .memory_size(memory_requirement.memory_requirements.size),
                 );
             }
-            let _ = loader.bind_video_session_memory(session, &binds).unwrap();
+            let () = loader.bind_video_session_memory(session, &binds).unwrap();
             memories
         }
     }
@@ -314,7 +312,7 @@ impl Decoder for Aura {
                 )
                 .unwrap();
             device.bind_buffer_memory(buffer, memory, 0).unwrap();
-            (buffer, memory, final_alloc_size as u32)
+            (buffer, memory, u32::try_from(final_alloc_size).unwrap())
         }
     }
     fn upload_bitstream_packet(&self, data: &[u8], swapchain_sync_idx: usize) {
@@ -324,21 +322,21 @@ impl Decoder for Aura {
                 .map_memory(
                     self.bitstream_memories[swapchain_sync_idx],
                     0,
-                    self.bitstream_sizes[swapchain_sync_idx] as u64,
+                    u64::from(self.bitstream_sizes[swapchain_sync_idx]),
                     vk::MemoryMapFlags::empty(),
                 )
                 .unwrap();
-            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len());
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.cast::<u8>(), data.len());
             self.device
                 .unmap_memory(self.bitstream_memories[swapchain_sync_idx]);
         }
     }
-
+    
     fn setup_decoder(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
         device: &ash::Device,
-        extradata: &Vec<u8>,
+        extradata: &[u8],
         queue_family_index: u32,
         codec_operation: vk::VideoCodecOperationFlagsKHR,
         profile_idc: Option<impl VideoProfile>,
@@ -346,24 +344,19 @@ impl Decoder for Aura {
         chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
         chroma_subsampling: vk::VideoChromaSubsamplingFlagsKHR,
         picture_format: vk::Format,
-        reference_picture_format: vk::Format,
+        reference_picture_format: vk::Format
     ) -> DecodingSession {
         let video_loader = video_queue::Device::load(instance, device);
         let decode_loader = VideoDecodeLoader::load(instance, device);
 
-        let session = Aura::create_video_session(
-            instance,
-            device,
-            queue_family_index,
-            codec_operation,
-            profile_idc,
-            chroma_subsampling,
-            picture_format,
-            luma_depth,
-            chroma_depth,
-            reference_picture_format,
-        )
-        .unwrap();
+        let session = Aura::create_video_session(instance, device, queue_family_index, 
+            codec_operation, 
+            profile_idc, 
+            chroma_subsampling, 
+            picture_format, 
+            luma_depth, 
+            chroma_depth, 
+            reference_picture_format).unwrap();
 
         let session_parameters = unsafe {
             Aura::create_h264_session_parameters(device, &video_loader, extradata, session)
@@ -393,7 +386,7 @@ impl Decoder for Aura {
         ycbcr_conversion: vk::SamplerYcbcrConversion,
         dpb_pool_size: usize,
         dpb_format: vk::Format,
-        video_extent: vk::Extent2D,
+        video_extent: vk::Extent2D
     ) -> (
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
@@ -411,9 +404,9 @@ impl Decoder for Aura {
             .push(&mut profile_list)
             .image_type(vk::ImageType::TYPE_2D)
             .format(dpb_format)
-            .extent(dpb_dst_extent.clone())
+            .extent(dpb_dst_extent)
             .mip_levels(1)
-            .array_layers(dpb_pool_size as u32)
+            .array_layers(u32::try_from(dpb_pool_size).unwrap())
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
             .usage(vk::ImageUsageFlags::VIDEO_DECODE_DPB_KHR)
@@ -425,9 +418,9 @@ impl Decoder for Aura {
             .push(&mut profile_list)
             .image_type(vk::ImageType::TYPE_2D)
             .format(dpb_format)
-            .extent(dpb_dst_extent.clone())
+            .extent(dpb_dst_extent)
             .mip_levels(1)
-            .array_layers(dpb_pool_size as u32)
+            .array_layers(u32::try_from(dpb_pool_size).unwrap())
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
             .usage(vk::ImageUsageFlags::VIDEO_DECODE_DST_KHR | vk::ImageUsageFlags::SAMPLED)
@@ -486,7 +479,7 @@ impl Decoder for Aura {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
                     level_count: 1,
-                    base_array_layer: i as u32,
+                    base_array_layer: u32::try_from(i).unwrap(),
                     layer_count: 1,
                 });
             let mut local_ycbcr_info =
@@ -501,7 +494,7 @@ impl Decoder for Aura {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
                     level_count: 1,
-                    base_array_layer: i as u32,
+                    base_array_layer: u32::try_from(i).unwrap(),
                     layer_count: 1,
                 });
 
@@ -642,21 +635,22 @@ impl Decoder for Aura {
     }
 
     /*
-     *  Well... There are two ways to show decoded frames in Vulkan:
-     *       - no-copy (DPB -> ImageLayout conversion [VIDEO_DECODE_DPB_KHR -> SHADER_READ_ONLY_OPTIMAL] ->
-     *            SamplerYcbcr -> Fragment Shader -> ImageLayout Reversion -> back to DPB);
-     *       - copy (DPB -> 2 independent image copies [Image A - Y, Image B - U & V] considering the YUV format -> Fragment Shader).
-     *
-     *  The first one is obviously what we want to do because the performance is better and it will decrease the needed VRAM size,
-     *  but it doesn't allow us to use vkCmdBlitImage. Its direct consequence is that on some GPUs that don't support
-     *  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT, we can't maintain the original frame quality if the user
-     *  resizes the window (color artifacting).
-     *
-     *  For now, we won't use the copy method on purpose. In the future, this player will verify the window extent and use
-     *  the copy or no-copy approach depending on whether it matches.
-     *
-     */
-
+    *  Well... There are two ways to show decoded frames in Vulkan:
+    *       - no-copy (DPB -> ImageLayout conversion [VIDEO_DECODE_DPB_KHR -> SHADER_READ_ONLY_OPTIMAL] ->
+    *            SamplerYcbcr -> Fragment Shader -> ImageLayout Reversion -> back to DPB);
+    *       - copy (DPB -> 2 independent image copies [Image A - Y, Image B - U & V] considering the YUV format -> Fragment Shader).
+    * 
+    *  The first one is obviously what we want to do because the performance is better and it will decrease the needed VRAM size,
+    *  but it doesn't allow us to use vkCmdBlitImage. Its direct consequence is that on some GPUs that don't support
+    *  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT, we can't maintain the original frame quality if the user
+    *  resizes the window (color artifacting).
+    * 
+    *  For now, we won't use the copy method on purpose. In the future, this player will verify the window extent and use
+    *  the copy or no-copy approach depending on whether it matches.
+    *
+    */
+    
+     
     fn copy_image(
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,

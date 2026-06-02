@@ -21,7 +21,7 @@ impl VideoClock {
         if self.start_time.is_none() {
             self.start();
         }
-
+        #[allow(clippy::cast_precision_loss)]
         let target_time_secs = pts as f64 * self.time_base;
         let current_time_secs = self.start_time.unwrap().elapsed().as_secs_f64();
         let diff = target_time_secs - current_time_secs;

@@ -16,7 +16,6 @@ use ffmpeg_next::ffi::AVCodecID;
 use ffmpeg_next::ffi::{AVColorRange, AVPixelFormat};
 use raw_window_handle::{self, HasDisplayHandle, HasWindowHandle};
 use std::ffi::CStr;
-use std::i32;
 
 pub const SWAPHAIN_IMAGE_COUNT: u8 = 4;
 pub const FRAMES_IN_FLIGHT: u8 = SWAPHAIN_IMAGE_COUNT - 1;
@@ -98,7 +97,7 @@ impl Aura {
 
     pub fn new(
         window: &winit::window::Window,
-        extradata: &Vec<u8>,
+        extradata: &[u8],
         v_ctx: Option<&VideoContext>,
     ) -> Self {
         let entry = unsafe { Entry::load().expect("Failed to load vulkan driver.") };
@@ -107,7 +106,7 @@ impl Aura {
                 let major = vk::api_version_major(version);
                 let minor = vk::api_version_minor(version);
                 let patch = vk::api_version_patch(version);
-                log::info!("Vulkan {}.{}.{}", major, minor, patch);
+                log::info!("Vulkan {major}.{minor}.{patch}");
             }
             None => log::info!("Vulkan 1.0"),
         }
@@ -118,7 +117,7 @@ impl Aura {
             vec![]
         };
         let layers_pointers: Vec<*const std::os::raw::c_char> =
-            layer_names.iter().map(|&name| name).collect();
+            layer_names.iter().copied().map(|name| name).collect();
         let mut required_instance_extensions: Vec<&CStr> =
             ash_window::enumerate_required_extensions(window.display_handle().unwrap().as_raw())
                 .expect("Failed to retrieve window extensions.")
@@ -242,11 +241,11 @@ impl Aura {
                 match (*raw_params).color_range {
                     AVColorRange::AVCOL_RANGE_MPEG => vk::SamplerYcbcrRange::ITU_NARROW,
                     AVColorRange::AVCOL_RANGE_JPEG => vk::SamplerYcbcrRange::ITU_FULL,
-                    _ => vk::SamplerYcbcrRange::ITU_NARROW,
+                    _ => vk::SamplerYcbcrRange::ITU_NARROW_KHR, // _KHR to avoid clippy errors, this won't change anything.
                 }
             }
         } else {
-            vk::SamplerYcbcrRange::ITU_NARROW
+            vk::SamplerYcbcrRange::ITU_NARROW_KHR
         };
         let video_codec: vk::VideoCodecOperationFlagsKHR = if let Some(v_ctx) = v_ctx {
             unsafe {
@@ -388,8 +387,8 @@ impl Aura {
         };
         let video_extent = vk::Extent2D {
             // keeps multiple of 16 for now just for h264 compatibility
-            width: (video_width as u32).div_ceil(16) * 16,
-            height: (video_height as u32).div_ceil(16) * 16,
+            width: video_width.cast_unsigned().div_ceil(16) * 16,
+            height: video_height.cast_unsigned().div_ceil(16) * 16,
         };
 
         // Ycbcr Sampler
@@ -453,7 +452,7 @@ impl Aura {
         );
         let mut bitstream_buffers = [vk::Buffer::null(); FRAMES_IN_FLIGHT as usize];
         let mut bitstream_memories = [vk::DeviceMemory::null(); FRAMES_IN_FLIGHT as usize];
-        let mut bitstream_sizes = [0 as u32; FRAMES_IN_FLIGHT as usize];
+        let mut bitstream_sizes = [0_u32; FRAMES_IN_FLIGHT as usize];
         for i in 0..FRAMES_IN_FLIGHT {
             let (bitstream_buffer, bitstream_memory, bitstream_size) =
                 Aura::create_bitstream_buffer(
@@ -465,7 +464,7 @@ impl Aura {
                 );
             bitstream_buffers[i as usize] = bitstream_buffer;
             bitstream_memories[i as usize] = bitstream_memory;
-            bitstream_sizes[i as usize] = bitstream_size
+            bitstream_sizes[i as usize] = bitstream_size;
         }
         let (
             swapchain_loader,
@@ -507,7 +506,7 @@ impl Aura {
         };
         let graphics_cmd_alloc = vk::CommandBufferAllocateInfo::default()
             .command_pool(graphics_command_pool)
-            .command_buffer_count(FRAMES_IN_FLIGHT as u32);
+            .command_buffer_count(u32::from(FRAMES_IN_FLIGHT));
         let graphics_command_buffers = unsafe {
             device
                 .allocate_command_buffers(&graphics_cmd_alloc)
@@ -517,7 +516,7 @@ impl Aura {
         let video_alloc_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(video_command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
-            .command_buffer_count(FRAMES_IN_FLIGHT as u32);
+            .command_buffer_count(u32::from(FRAMES_IN_FLIGHT));
         let video_command_buffers =
             unsafe { device.allocate_command_buffers(&video_alloc_info).unwrap() };
 
@@ -573,11 +572,11 @@ impl Aura {
         for _ in 0..FRAMES_IN_FLIGHT {
             descriptor_set_layouts.push(Self::create_video_descriptor_set_layout(
                 &device,
-                &video_sampler,
+                video_sampler,
                 1,
             ));
         }
-        let descriptor_pool = Self::create_descriptor_pool(&device, FRAMES_IN_FLIGHT as u32);
+        let descriptor_pool = Self::create_descriptor_pool(&device, u32::from(FRAMES_IN_FLIGHT));
         let descriptor_sets =
             Self::allocate_descriptor_sets(&device, &descriptor_set_layouts, descriptor_pool);
         let pipeline_layout = Self::create_pipeline_layout(&device, &descriptor_set_layouts);
@@ -652,7 +651,7 @@ impl Aura {
             dpb_and_dst_format: dpb_and_dst_format,
             current_frame_count_idx: 0,
             dpb_pool_size: DPB_POOL_SIZE,
-            dpb_frame_nums: [0 as u16; DPB_POOL_SIZE as usize],
+            dpb_frame_nums: [0_u16; DPB_POOL_SIZE],
             dpb_slot_valid: vec![false; DPB_POOL_SIZE],
             dpb_pocs: vec![0; DPB_POOL_SIZE],
             descriptor_pool: descriptor_pool,
@@ -682,7 +681,7 @@ impl Aura {
             let mut supported_codecs = SupportedCodecs::default();
 
             for (index, prop) in props.iter().enumerate() {
-                let idx = index as u32;
+                let idx = u32::try_from(index).unwrap();
 
                 if prop.queue_flags.contains(vk::QueueFlags::VIDEO_DECODE_KHR) {
                     decode_index = Some(idx);
@@ -701,7 +700,7 @@ impl Aura {
                                 supported_codecs.h265 = true;
                             } else if ext_cstr == DecodeExtensions::AV1 {
                                 supported_codecs.av1 = true;
-                            };
+                            }
                         }
                     }
                 }
@@ -719,9 +718,7 @@ impl Aura {
 
             if let (Some(g_idx), Some(v_idx)) = (graphics_index, decode_index) {
                 log::info!(
-                    "GPU successfully detected! Graphic queue: {}, Video Queue: {}",
-                    g_idx,
-                    v_idx
+                    "GPU successfully detected! Graphic queue: {g_idx}, Video Queue: {v_idx}",
                 );
                 return (pdevice, (g_idx, v_idx), supported_codecs);
             }
@@ -740,9 +737,9 @@ impl Drop for Aura {
             log::info!("Cleaning Vulkan instance...");
 
             if self.device.handle() != vk::Device::null() {
-                let _ = self.device.queue_wait_idle(self.graphics_queue);
-                let _ = self.device.queue_wait_idle(self.video_queue);
-                let _ = self.device.device_wait_idle();
+                let () = self.device.queue_wait_idle(self.graphics_queue).unwrap();
+                let () = self.device.queue_wait_idle(self.video_queue).unwrap();
+                let () = self.device.device_wait_idle().unwrap();
             }
 
             for &view in &self.swapchain_image_views {

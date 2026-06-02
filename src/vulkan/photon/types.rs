@@ -10,12 +10,13 @@ impl DecodeExtensions {
 }
 
 /// Describes which codecs are supported by the physical device.
+#[derive(Default)]
 pub struct SupportedCodecs {
     pub h264: bool,
     pub h265: bool,
     pub av1: bool,
 }
-impl Default for SupportedCodecs {
+impl SupportedCodecs {
     fn default() -> Self {
         Self {
             h264: false,
@@ -25,7 +26,7 @@ impl Default for SupportedCodecs {
     }
 }
 
-/// Wrapper for profiles enums of vk::native.
+/// Wrapper for profiles enums of `vk::native`.
 #[allow(non_snake_case)]
 pub mod VideoCodecsProfiles {
     use ash::vk;

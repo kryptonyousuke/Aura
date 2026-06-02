@@ -19,6 +19,6 @@ fn main() -> Result<()> {
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
     let mut app = vulkan::wsi::wsi::App::new(args.file_name);
-    let _ = event_loop.run_app(&mut app);
+    let () = event_loop.run_app(&mut app)?;
     Ok(())
 }

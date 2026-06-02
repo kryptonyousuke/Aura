@@ -4,7 +4,7 @@ use ash::vk::{self, TaggedStructure};
 pub trait Pipeline {
     fn create_video_descriptor_set_layout(
         device: &ash::Device,
-        video_sampler: &vk::Sampler,
+        video_sampler: vk::Sampler,
         count: u32,
     ) -> vk::DescriptorSetLayout;
     fn create_descriptor_pool(device: &ash::Device, count: u32) -> vk::DescriptorPool;
@@ -32,7 +32,7 @@ pub trait Pipeline {
 impl Pipeline for Aura {
     fn create_video_descriptor_set_layout(
         device: &ash::Device,
-        video_sampler: &vk::Sampler,
+        video_sampler: vk::Sampler,
         count: u32,
     ) -> vk::DescriptorSetLayout {
         let layout_binding = vk::DescriptorSetLayoutBinding::default()
@@ -40,7 +40,7 @@ impl Pipeline for Aura {
             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
             .descriptor_count(count)
             .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-            .immutable_samplers(std::slice::from_ref(video_sampler));
+            .immutable_samplers(std::slice::from_ref(&video_sampler));
         let layout_info = vk::DescriptorSetLayoutCreateInfo::default()
             .bindings(std::slice::from_ref(&layout_binding));
         unsafe {

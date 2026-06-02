@@ -31,7 +31,7 @@ impl Aura {
             vk::SwapchainPresentModesCreateInfoEXT::default().present_modes(&present_modes);
         let format = formats
             .iter()
-            .cloned()
+            .copied()
             .find(|f| {
                 f.format == vk::Format::B8G8R8A8_SRGB
                     && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
@@ -43,9 +43,7 @@ impl Aura {
             vk::PresentModeKHR::FIFO
         };
 
-        let extent = if capabilities.current_extent.width != u32::MAX {
-            capabilities.current_extent
-        } else {
+        let extent = if capabilities.current_extent.width == u32::MAX {
             let size = window.inner_size();
             vk::Extent2D {
                 width: size.width.clamp(
@@ -57,6 +55,8 @@ impl Aura {
                     capabilities.max_image_extent.height,
                 ),
             }
+        } else {
+            capabilities.current_extent
         };
 
         let mut image_count = capabilities.min_image_count + 1;

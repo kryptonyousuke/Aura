@@ -27,12 +27,12 @@ pub fn avcc_to_annexb(
         let nalu_type = data[start_data] & 0x1F;
 
         if nalu_type >= 1 && nalu_type <= 5 {
-            slice_offsets.push(out.len() as u32);
+            slice_offsets.push(u32::try_from(out.len()).unwrap());
 
             out.extend_from_slice(&[0, 0, 0, 1]);
             out.extend_from_slice(&data[start_data..end_data]);
         } else {
-            log::debug!("Non-VCL NALU detected. Type: {}", nalu_type);
+            log::debug!("Non-VCL NALU detected. Type: {nalu_type}");
         }
 
         offset = end_data;
@@ -150,7 +150,7 @@ impl<'a> BitReader<'a> {
     fn read_u(&mut self, n: usize) -> Option<u32> {
         let mut val = 0;
         for _ in 0..n {
-            val = (val << 1) | (self.read_bit()? as u32);
+            val = (val << 1) | (u32::from(self.read_bit()?));
         }
         Some(val)
     }
@@ -179,7 +179,7 @@ pub fn parse_slice_header(
     let pic_parameter_set_id = br.read_ue()?;
 
     let frame_num_len = (sps.log2_max_frame_num_minus4 + 4) as usize;
-    let frame_num = br.read_u(frame_num_len)? as u16;
+    let frame_num = u16::try_from(br.read_u(frame_num_len)?).unwrap();
 
     if !sps.frame_mbs_only_flag {
         let field_pic_flag = br.read_u(1)?;

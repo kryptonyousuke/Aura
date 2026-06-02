@@ -34,7 +34,7 @@ impl Shaders for Aura {
         frag_module: vk::ShaderModule,
     ) -> [vk::PipelineShaderStageCreateInfo<'_>; 2] {
         let entry_point: &'static CStr = c"main";
-        let shader_stages = [
+        [
             vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::VERTEX)
                 .module(vert_module)
@@ -43,8 +43,6 @@ impl Shaders for Aura {
                 .stage(vk::ShaderStageFlags::FRAGMENT)
                 .module(frag_module)
                 .name(entry_point),
-        ];
-
-        shader_stages
+        ]
     }
 }

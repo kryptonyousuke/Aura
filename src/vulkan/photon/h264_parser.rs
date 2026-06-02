@@ -44,7 +44,7 @@ impl BitReader {
             self.bit_idx = 0;
             self.byte_idx += 1;
         }
-        Some(bit as u32)
+        Some(u32::from(bit))
     }
 
     fn read_bits(&mut self, n: usize) -> Option<u32> {
@@ -70,9 +70,9 @@ impl BitReader {
     fn read_se(&mut self) -> Option<i32> {
         let ue = self.read_ue()?;
         if ue % 2 == 0 {
-            Some(-(ue as i32 / 2))
+            Some(-(ue.cast_signed() / 2))
         } else {
-            Some((ue as i32 + 1) / 2)
+            Some((ue.cast_signed() + 1) / 2)
         }
     }
 
@@ -180,7 +180,7 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
         qpprime_y_zero_transform_bypass_flag = reader.read_bit()?;
         seq_scaling_matrix_present_flag = reader.read_bit()?;
         if seq_scaling_matrix_present_flag == 1 {
-            let limit = if chroma_format_idc != 3 { 8 } else { 12 };
+            let limit = if chroma_format_idc == 3 { 12 } else { 8 };
             for i in 0..limit {
                 if reader.read_bit()? == 1 {
                     let size = if i < 6 { 16 } else { 64 };
@@ -316,15 +316,15 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
         _ => vk::native::StdVideoH264PocType_STD_VIDEO_H264_POC_TYPE_INVALID,
     };
 
-    std_sps.seq_parameter_set_id = sps_id as u8;
-    std_sps.bit_depth_luma_minus8 = bit_depth_luma_minus8 as u8;
-    std_sps.bit_depth_chroma_minus8 = bit_depth_chroma_minus8 as u8;
-    std_sps.log2_max_frame_num_minus4 = log2_max_frame_num_minus4 as u8;
-    std_sps.log2_max_pic_order_cnt_lsb_minus4 = log2_max_pic_order_cnt_lsb_minus4 as u8;
+    std_sps.seq_parameter_set_id = u8::try_from(sps_id).unwrap();
+    std_sps.bit_depth_luma_minus8 = u8::try_from(bit_depth_luma_minus8).unwrap();
+    std_sps.bit_depth_chroma_minus8 = u8::try_from(bit_depth_chroma_minus8).unwrap();
+    std_sps.log2_max_frame_num_minus4 = u8::try_from(log2_max_frame_num_minus4).unwrap();
+    std_sps.log2_max_pic_order_cnt_lsb_minus4 = u8::try_from(log2_max_pic_order_cnt_lsb_minus4).unwrap();
     std_sps.offset_for_non_ref_pic = offset_for_non_ref_pic;
     std_sps.offset_for_top_to_bottom_field = offset_for_top_to_bottom_field;
-    std_sps.num_ref_frames_in_pic_order_cnt_cycle = num_ref_frames_in_pic_order_cnt_cycle as u8;
-    std_sps.max_num_ref_frames = max_num_ref_frames as u8;
+    std_sps.num_ref_frames_in_pic_order_cnt_cycle = u8::try_from(num_ref_frames_in_pic_order_cnt_cycle).unwrap();
+    std_sps.max_num_ref_frames = u8::try_from(max_num_ref_frames).unwrap();
     std_sps.pic_width_in_mbs_minus1 = pic_width_in_mbs_minus1;
     std_sps.pic_height_in_map_units_minus1 = pic_height_in_map_units_minus1;
     std_sps.frame_crop_left_offset = frame_crop_left_offset;
@@ -376,7 +376,7 @@ pub fn parse_pps(extradata: &[u8]) -> Option<vk::native::StdVideoH264PicturePara
                 bits = 1;
             }
             for _ in 0..=pic_size_in_map_units_minus1 {
-                reader.read_bits(bits as usize)?;
+                reader.read_bits(usize::try_from(bits).unwrap())?;
             }
         }
     }
@@ -421,10 +421,10 @@ pub fn parse_pps(extradata: &[u8]) -> Option<vk::native::StdVideoH264PicturePara
     let mut std_pps: vk::native::StdVideoH264PictureParameterSet =
         unsafe { MaybeUninit::zeroed().assume_init() };
     std_pps.flags = pps_flags;
-    std_pps.pic_parameter_set_id = pic_parameter_set_id as u8;
-    std_pps.seq_parameter_set_id = seq_parameter_set_id as u8;
-    std_pps.num_ref_idx_l0_default_active_minus1 = num_ref_idx_l0_default_active_minus1 as u8;
-    std_pps.num_ref_idx_l1_default_active_minus1 = num_ref_idx_l1_default_active_minus1 as u8;
+    std_pps.pic_parameter_set_id = u8::try_from(pic_parameter_set_id).unwrap();
+    std_pps.seq_parameter_set_id = u8::try_from(seq_parameter_set_id).unwrap();
+    std_pps.num_ref_idx_l0_default_active_minus1 = u8::try_from(num_ref_idx_l0_default_active_minus1).unwrap();
+    std_pps.num_ref_idx_l1_default_active_minus1 = u8::try_from(num_ref_idx_l1_default_active_minus1).unwrap();
 
     std_pps.weighted_bipred_idc = match weighted_bipred_idc {
         0 => vk::native::StdVideoH264WeightedBipredIdc_STD_VIDEO_H264_WEIGHTED_BIPRED_IDC_DEFAULT,
@@ -433,10 +433,10 @@ pub fn parse_pps(extradata: &[u8]) -> Option<vk::native::StdVideoH264PicturePara
         _ => vk::native::StdVideoH264WeightedBipredIdc_STD_VIDEO_H264_WEIGHTED_BIPRED_IDC_INVALID,
     };
 
-    std_pps.pic_init_qp_minus26 = pic_init_qp_minus26 as i8;
-    std_pps.pic_init_qs_minus26 = pic_init_qs_minus26 as i8;
-    std_pps.chroma_qp_index_offset = chroma_qp_index_offset as i8;
-    std_pps.second_chroma_qp_index_offset = second_chroma_qp_index_offset as i8;
+    std_pps.pic_init_qp_minus26 = i8::try_from(pic_init_qp_minus26).unwrap();
+    std_pps.pic_init_qs_minus26 = i8::try_from(pic_init_qs_minus26).unwrap();
+    std_pps.chroma_qp_index_offset = i8::try_from(chroma_qp_index_offset).unwrap();
+    std_pps.second_chroma_qp_index_offset = i8::try_from(second_chroma_qp_index_offset).unwrap();
 
     Some(std_pps)
 }
