@@ -12,6 +12,7 @@ use ash::khr::video_queue;
 use ash::vk::{TaggedStructure, make_api_version};
 use ash::{Device, Instance, khr::video_decode_queue::Device as VideoDecodeLoader, vk};
 
+/// Wrapper for the current decoding session.
 pub struct DecodingSession {
     pub(crate) session: vk::VideoSessionKHR,
     pub(crate) _session_memories: Vec<vk::DeviceMemory>,
@@ -20,7 +21,9 @@ pub struct DecodingSession {
     pub(crate) session_parameters: vk::VideoSessionParametersKHR,
 }
 
+/// Essential functions to any decoding session.
 pub trait Decoder {
+    /// Creates a vulkan video session or returns a ´PhotonError´.
     fn create_video_session(
         instance: &Instance,
         device: &Device,
@@ -33,13 +36,14 @@ pub trait Decoder {
         chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
         reference_picture_format: vk::Format,
     ) -> Result<vk::VideoSessionKHR, PhotonError>;
-    /// Checks wether or not a memmory type is supported and returns its index.
+    /// Checks wether or not a memory type is supported and returns its index.
     fn find_memory_type_index(
         instance: &Instance,
         pdevice: vk::PhysicalDevice,
         type_filter: u32,
         props: vk::MemoryPropertyFlags,
     ) -> u32;
+    /// Allocate memories for the video session.
     fn allocate_video_session_memories(
         instance: &Instance,
         pd: vk::PhysicalDevice,
@@ -58,7 +62,7 @@ pub trait Decoder {
 
     /// Uploads the current bitstream buffer (RAM) into a vulkan buffer (VRAM).
     fn upload_bitstream_packet(&self, data: &[u8], swapchain_sync_idx: usize);
-
+    /// Setups a decoding session.
     fn setup_decoder(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,

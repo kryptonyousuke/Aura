@@ -5,13 +5,14 @@ use std::ffi::CStr;
 #[macro_export]
 macro_rules! create_shader {
     ($device:expr, $shader_name:literal) => {{
+        let device: &ash::Device = $device;
         let shader_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/", $shader_name));
         let shader_u32 = ash::util::read_spv(&mut std::io::Cursor::new(&shader_bytes[..]))
             .expect("Failed to read shader SPIR-V");
         unsafe {
-            $device
+            device
                 .create_shader_module(
-                    &vk::ShaderModuleCreateInfo::default().code(&shader_u32),
+                    &ash::vk::ShaderModuleCreateInfo::default().code(&shader_u32),
                     None,
                 )
                 .expect("Failed to create shader module")

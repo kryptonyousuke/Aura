@@ -563,8 +563,8 @@ impl Aura {
                     .unwrap();
             }
         }
-        let vert_module = crate::create_shader!(device, "full_screen.vert.spv");
-        let frag_module = crate::create_shader!(device, "show_texture.frag.spv");
+        let vert_module = crate::create_shader!(&device, "full_screen.vert.spv");
+        let frag_module = crate::create_shader!(&device, "show_texture.frag.spv");
         let shader_stages = Self::create_shader_stages(&device, vert_module, frag_module);
 
         let video_sampler = Self::create_sampler(&device, ycbcr_conversion);
