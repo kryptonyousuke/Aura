@@ -30,3 +30,10 @@ thiserror = "2.0.18"
 [build-dependencies]
 shaderc = "0.10.1"
 
+[lints.clippy]
+# warnings = "deny"
+pedantic = { level = "deny", priority = -1 }
+redundant_field_names = "allow"
+used_underscore_binding = "allow"
+too_many_lines = "allow"
+similar_names = "allow"
