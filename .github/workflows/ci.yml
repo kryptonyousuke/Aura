@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install dependencies
         run: |
@@ -38,6 +38,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      - name: Check
+        run: cargo check --workspace --all-targets --all-features
+
       - name: Cache cargo registry + git
         uses: actions/cache@v5
         with:
