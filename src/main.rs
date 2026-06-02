@@ -2,8 +2,8 @@ use ffmpeg_next as ffmpeg;
 mod video;
 mod vulkan;
 use anyhow::Result;
-use winit::event_loop::EventLoop;
 use clap::Parser;
+use winit::event_loop::EventLoop;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

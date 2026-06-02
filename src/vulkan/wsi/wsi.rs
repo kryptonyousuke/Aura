@@ -72,10 +72,9 @@ impl ApplicationHandler for App {
                 nalu_length_size: nalu_length_size,
                 is_first_frame: true,
                 clock: clock,
-                params: params
+                params: params,
             };
 
-            
             let aura = Aura::new(&window, &extradata, Some(&v_ctx));
             self.video_ctx = Some(v_ctx);
 

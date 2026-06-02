@@ -1,18 +1,16 @@
 //! # Decoder implementation.
 //! Provides required functions for any decoder instance.
 
-
 use std::ffi::CStr;
 
-use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
-use crate::vulkan::photon::h264::H264Decoder;
-use crate::vulkan::vk_init::Aura;
 use super::types::PhotonError;
+use crate::vulkan::photon::h264::H264Decoder;
+use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
+use crate::vulkan::vk_init::Aura;
+use anyhow::Result;
 use ash::khr::video_queue;
 use ash::vk::{TaggedStructure, make_api_version};
-use ash::{Device, Instance, vk, khr::{video_decode_queue::Device as VideoDecodeLoader}};
-use anyhow::Result;
-
+use ash::{Device, Instance, khr::video_decode_queue::Device as VideoDecodeLoader, vk};
 
 pub struct DecodingSession {
     pub(crate) session: vk::VideoSessionKHR,
@@ -34,7 +32,7 @@ pub trait Decoder {
         picture_format: vk::Format,
         luma_depth: vk::VideoComponentBitDepthFlagsKHR,
         chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
-        reference_picture_format: vk::Format
+        reference_picture_format: vk::Format,
     ) -> Result<vk::VideoSessionKHR, PhotonError>;
     /// Checks wether or not a memory type is supported and returns its index.
     fn find_memory_type_index(
@@ -75,7 +73,7 @@ pub trait Decoder {
         chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
         chroma_subsampling: vk::VideoChromaSubsamplingFlagsKHR,
         picture_format: vk::Format,
-        reference_picture_format: vk::Format
+        reference_picture_format: vk::Format,
     ) -> DecodingSession;
     fn create_dpb_dst_pool(
         instance: &Instance,
@@ -85,7 +83,7 @@ pub trait Decoder {
         ycbcr_conversion: vk::SamplerYcbcrConversion,
         dpb_pool_size: usize,
         dpb_format: vk::Format,
-        video_extent: vk::Extent2D
+        video_extent: vk::Extent2D,
     ) -> (
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
@@ -150,17 +148,17 @@ impl Decoder for Aura {
         picture_format: vk::Format,
         luma_depth: vk::VideoComponentBitDepthFlagsKHR,
         chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
-        reference_picture_format: vk::Format
+        reference_picture_format: vk::Format,
     ) -> Result<vk::VideoSessionKHR, PhotonError> {
         if let Some(profile_idc) = profile_idc {
             let extension_name: &CStr;
-            
-            let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
-                .std_profile_idc(profile_idc.as_raw());
-            let mut h265_profile = vk::VideoDecodeH265ProfileInfoKHR::default()
-                .std_profile_idc(profile_idc.as_raw());
-            let mut av1_profile = vk::VideoDecodeAV1ProfileInfoKHR::default()
-                .std_profile(profile_idc.as_raw());
+
+            let mut h264_profile =
+                vk::VideoDecodeH264ProfileInfoKHR::default().std_profile_idc(profile_idc.as_raw());
+            let mut h265_profile =
+                vk::VideoDecodeH265ProfileInfoKHR::default().std_profile_idc(profile_idc.as_raw());
+            let mut av1_profile =
+                vk::VideoDecodeAV1ProfileInfoKHR::default().std_profile(profile_idc.as_raw());
             let mut video_profile = vk::VideoProfileInfoKHR::default()
                 .video_codec_operation(codec_operation)
                 .chroma_subsampling(chroma_subsampling)
@@ -176,11 +174,12 @@ impl Decoder for Aura {
                 video_profile = video_profile.push(&mut av1_profile);
                 extension_name = c"VK_STD_vulkan_video_codec_av1_decode";
             } else {
-                return Err(PhotonError::InvalidCodecOperation)
+                return Err(PhotonError::InvalidCodecOperation);
             }
             let header_version = vk::ExtensionProperties::default()
                 .spec_version(make_api_version(0, 1, 0, 0))
-                .extension_name(extension_name).unwrap();
+                .extension_name(extension_name)
+                .unwrap();
             let create_info = vk::VideoSessionCreateInfoKHR::default()
                 .queue_family_index(video_queue_index)
                 .video_profile(&video_profile)
@@ -193,7 +192,7 @@ impl Decoder for Aura {
                 .max_dpb_slots(16)
                 .max_active_reference_pictures(16)
                 .std_header_version(&header_version);
-            
+
             let loader = video_queue::Device::load(instance, device);
             unsafe {
                 let session = loader.create_video_session(&create_info, None)?;
@@ -334,7 +333,7 @@ impl Decoder for Aura {
                 .unmap_memory(self.bitstream_memories[swapchain_sync_idx]);
         }
     }
-    
+
     fn setup_decoder(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
@@ -347,19 +346,24 @@ impl Decoder for Aura {
         chroma_depth: vk::VideoComponentBitDepthFlagsKHR,
         chroma_subsampling: vk::VideoChromaSubsamplingFlagsKHR,
         picture_format: vk::Format,
-        reference_picture_format: vk::Format
+        reference_picture_format: vk::Format,
     ) -> DecodingSession {
         let video_loader = video_queue::Device::load(instance, device);
         let decode_loader = VideoDecodeLoader::load(instance, device);
 
-        let session = Aura::create_video_session(instance, device, queue_family_index, 
-            codec_operation, 
-            profile_idc, 
-            chroma_subsampling, 
-            picture_format, 
-            luma_depth, 
-            chroma_depth, 
-            reference_picture_format).unwrap();
+        let session = Aura::create_video_session(
+            instance,
+            device,
+            queue_family_index,
+            codec_operation,
+            profile_idc,
+            chroma_subsampling,
+            picture_format,
+            luma_depth,
+            chroma_depth,
+            reference_picture_format,
+        )
+        .unwrap();
 
         let session_parameters = unsafe {
             Aura::create_h264_session_parameters(device, &video_loader, extradata, session)
@@ -389,7 +393,7 @@ impl Decoder for Aura {
         ycbcr_conversion: vk::SamplerYcbcrConversion,
         dpb_pool_size: usize,
         dpb_format: vk::Format,
-        video_extent: vk::Extent2D
+        video_extent: vk::Extent2D,
     ) -> (
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
@@ -638,22 +642,21 @@ impl Decoder for Aura {
     }
 
     /*
-    *  Well... There are two ways to show decoded frames in Vulkan:
-    *       - no-copy (DPB -> ImageLayout conversion [VIDEO_DECODE_DPB_KHR -> SHADER_READ_ONLY_OPTIMAL] ->
-    *            SamplerYcbcr -> Fragment Shader -> ImageLayout Reversion -> back to DPB);
-    *       - copy (DPB -> 2 independent image copies [Image A - Y, Image B - U & V] considering the YUV format -> Fragment Shader).
-    * 
-    *  The first one is obviously what we want to do because the performance is better and it will decrease the needed VRAM size,
-    *  but it doesn't allow us to use vkCmdBlitImage. Its direct consequence is that on some GPUs that don't support
-    *  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT, we can't maintain the original frame quality if the user
-    *  resizes the window (color artifacting).
-    * 
-    *  For now, we won't use the copy method on purpose. In the future, this player will verify the window extent and use
-    *  the copy or no-copy approach depending on whether it matches.
-    *
-    */
-    
-     
+     *  Well... There are two ways to show decoded frames in Vulkan:
+     *       - no-copy (DPB -> ImageLayout conversion [VIDEO_DECODE_DPB_KHR -> SHADER_READ_ONLY_OPTIMAL] ->
+     *            SamplerYcbcr -> Fragment Shader -> ImageLayout Reversion -> back to DPB);
+     *       - copy (DPB -> 2 independent image copies [Image A - Y, Image B - U & V] considering the YUV format -> Fragment Shader).
+     *
+     *  The first one is obviously what we want to do because the performance is better and it will decrease the needed VRAM size,
+     *  but it doesn't allow us to use vkCmdBlitImage. Its direct consequence is that on some GPUs that don't support
+     *  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT, we can't maintain the original frame quality if the user
+     *  resizes the window (color artifacting).
+     *
+     *  For now, we won't use the copy method on purpose. In the future, this player will verify the window extent and use
+     *  the copy or no-copy approach depending on whether it matches.
+     *
+     */
+
     fn copy_image(
         device: &ash::Device,
         command_buffer: vk::CommandBuffer,

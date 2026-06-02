@@ -1,10 +1,10 @@
 use super::debug;
 use crate::video::video_context::VideoContext;
 use crate::vulkan::photon::decoder::{Decoder, DecodingSession};
+use crate::vulkan::photon::sampler::Sampler;
 use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
 use crate::vulkan::photon::types::{DecodeExtensions, SupportedCodecs, VideoCodecsProfiles};
 use crate::vulkan::pipeline::Pipeline;
-use crate::vulkan::photon::sampler::Sampler;
 use crate::vulkan::shaders::Shaders;
 use ash::{
     Entry, Instance,
@@ -262,49 +262,47 @@ impl Aura {
             vk::VideoCodecOperationFlagsKHR::NONE
         };
 
-        let (video_chroma_flags, video_luma_depth, video_chroma_depth) = if let Some(v_ctx) = v_ctx {
+        let (video_chroma_flags, video_luma_depth, video_chroma_depth) = if let Some(v_ctx) = v_ctx
+        {
             unsafe {
                 let raw_params = v_ctx.params.as_ptr();
                 log::debug!("Pixel format indicator: {}", (*raw_params).format);
                 match (*raw_params).format {
-                    format if format == AVPixelFormat::AV_PIX_FMT_YUV420P as i32 || 
-                        format == AVPixelFormat::AV_PIX_FMT_YUVJ420P as i32 ||
-                        format == AVPixelFormat::AV_PIX_FMT_NV12 as i32 => {
-                            (
-                                vk::VideoChromaSubsamplingFlagsKHR::TYPE_420,
-                                vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
-                                vk::VideoComponentBitDepthFlagsKHR::TYPE_8
-                            )
-                    }
-                    format if format == AVPixelFormat::AV_PIX_FMT_YUV422P as i32 => {
+                    format
+                        if format == AVPixelFormat::AV_PIX_FMT_YUV420P as i32
+                            || format == AVPixelFormat::AV_PIX_FMT_YUVJ420P as i32
+                            || format == AVPixelFormat::AV_PIX_FMT_NV12 as i32 =>
+                    {
                         (
-                            vk::VideoChromaSubsamplingFlagsKHR::TYPE_422,
+                            vk::VideoChromaSubsamplingFlagsKHR::TYPE_420,
                             vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
-                            vk::VideoComponentBitDepthFlagsKHR::TYPE_8
+                            vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
                         )
                     }
-                    format if format == AVPixelFormat::AV_PIX_FMT_YUV444P as i32 => {
-                        (
-                            vk::VideoChromaSubsamplingFlagsKHR::TYPE_444,
-                            vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
-                            vk::VideoComponentBitDepthFlagsKHR::TYPE_8
-                        )
-                    }
+                    format if format == AVPixelFormat::AV_PIX_FMT_YUV422P as i32 => (
+                        vk::VideoChromaSubsamplingFlagsKHR::TYPE_422,
+                        vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
+                        vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
+                    ),
+                    format if format == AVPixelFormat::AV_PIX_FMT_YUV444P as i32 => (
+                        vk::VideoChromaSubsamplingFlagsKHR::TYPE_444,
+                        vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
+                        vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
+                    ),
                     _ => (
                         vk::VideoChromaSubsamplingFlagsKHR::INVALID,
                         vk::VideoComponentBitDepthFlagsKHR::INVALID,
-                        vk::VideoComponentBitDepthFlagsKHR::INVALID
-                    )
+                        vk::VideoComponentBitDepthFlagsKHR::INVALID,
+                    ),
                 }
             }
         } else {
             (
                 vk::VideoChromaSubsamplingFlagsKHR::INVALID,
                 vk::VideoComponentBitDepthFlagsKHR::INVALID,
-                vk::VideoComponentBitDepthFlagsKHR::INVALID
+                vk::VideoComponentBitDepthFlagsKHR::INVALID,
             )
         };
-        
 
         let video_profile_indicator = if let Some(v_ctx) = v_ctx {
             unsafe {

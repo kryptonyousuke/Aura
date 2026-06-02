@@ -117,7 +117,7 @@ impl Aura {
         }
         log::info!("------------------------------------------");
     }
-    pub fn log_instance_extensions(entry: &ash::Entry, required_instance_extensions: &Vec<&CStr>){
+    pub fn log_instance_extensions(entry: &ash::Entry, required_instance_extensions: &Vec<&CStr>) {
         let available_extensions = unsafe {
             entry
                 .enumerate_instance_extension_properties(None)

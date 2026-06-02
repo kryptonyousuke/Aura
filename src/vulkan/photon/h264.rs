@@ -426,18 +426,16 @@ impl H264Decoder for Aura {
             self.current_frame_count_idx += 1;
         }
     }
-    /// 
+    ///
     unsafe fn create_h264_session_parameters(
         _device: &Device,
         video_loader: &video_queue::Device,
         extradata: &[u8],
         session: vk::VideoSessionKHR,
     ) -> vk::VideoSessionParametersKHR {
-        let std_sps = super::h264_parser::parse_sps(extradata)
-            .expect("Failed to parse SPS");
+        let std_sps = super::h264_parser::parse_sps(extradata).expect("Failed to parse SPS");
 
-        let std_pps = super::h264_parser::parse_pps(extradata)
-            .expect("Failed to parse PPS");
+        let std_pps = super::h264_parser::parse_pps(extradata).expect("Failed to parse PPS");
         log::info!(
             "Resolution: {}x{}",
             (std_sps.pic_width_in_mbs_minus1 + 1) * 16,

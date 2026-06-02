@@ -86,7 +86,7 @@ impl BitReader {
                 break;
             }
         }
-        
+
         if let Some(last_one_pos) = last_one_bit_offset {
             let current_pos = self.byte_idx * 8 + self.bit_idx;
             current_pos < last_one_pos
@@ -97,35 +97,53 @@ impl BitReader {
 }
 
 pub fn extract_sps_bytes(extradata: &[u8]) -> Option<&[u8]> {
-    if extradata.len() < 8 { return None; }
+    if extradata.len() < 8 {
+        return None;
+    }
     let num_sps = extradata[5] & 0x1F;
-    if num_sps == 0 { return None; }
+    if num_sps == 0 {
+        return None;
+    }
     let sps_len = u16::from_be_bytes([extradata[6], extradata[7]]) as usize;
-    if extradata.len() < 8 + sps_len { return None; }
+    if extradata.len() < 8 + sps_len {
+        return None;
+    }
     Some(&extradata[8..8 + sps_len])
 }
 
 pub fn extract_pps_bytes(extradata: &[u8]) -> Option<&[u8]> {
-    if extradata.len() < 8 { return None; }
+    if extradata.len() < 8 {
+        return None;
+    }
     let num_sps = (extradata[5] & 0x1F) as usize;
-    
+
     let mut offset = 6;
     for _ in 0..num_sps {
-        if offset + 2 > extradata.len() { return None; }
+        if offset + 2 > extradata.len() {
+            return None;
+        }
         let sps_len = u16::from_be_bytes([extradata[offset], extradata[offset + 1]]) as usize;
         offset += 2 + sps_len;
     }
-    
-    if offset >= extradata.len() { return None; }
+
+    if offset >= extradata.len() {
+        return None;
+    }
     let num_pps = extradata[offset] as usize;
-    if num_pps == 0 { return None; }
-    
+    if num_pps == 0 {
+        return None;
+    }
+
     offset += 1;
-    if offset + 2 > extradata.len() { return None; }
+    if offset + 2 > extradata.len() {
+        return None;
+    }
     let pps_len = u16::from_be_bytes([extradata[offset], extradata[offset + 1]]) as usize;
     offset += 2;
-    
-    if offset + pps_len > extradata.len() { return None; }
+
+    if offset + pps_len > extradata.len() {
+        return None;
+    }
     Some(&extradata[offset..offset + pps_len])
 }
 
@@ -173,7 +191,11 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
                             let delta_scale = reader.read_se()?;
                             next_scale = (last_scale + delta_scale + 256) % 256;
                         }
-                        last_scale = if next_scale == 0 { last_scale } else { next_scale };
+                        last_scale = if next_scale == 0 {
+                            last_scale
+                        } else {
+                            next_scale
+                        };
                     }
                 }
             }
@@ -182,7 +204,7 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
 
     let log2_max_frame_num_minus4 = reader.read_ue()?;
     let pic_order_cnt_type = reader.read_ue()?;
-    
+
     let mut log2_max_pic_order_cnt_lsb_minus4 = 0;
     let mut delta_pic_order_always_zero_flag = 0;
     let mut offset_for_non_ref_pic = 0;
@@ -197,8 +219,8 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
         offset_for_top_to_bottom_field = reader.read_se()?;
         num_ref_frames_in_pic_order_cnt_cycle = reader.read_ue()?;
         for _ in 0..num_ref_frames_in_pic_order_cnt_cycle {
-            reader.read_se()?; 
-            // Note: Vulkan uses a `pOffsetForRefFrame` pointer if this loop executes. 
+            reader.read_se()?;
+            // Note: Vulkan uses a `pOffsetForRefFrame` pointer if this loop executes.
             // Leaving it null is fine if count is 0, but you will need an allocation otherwise.
         }
     }
@@ -208,15 +230,15 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
     let pic_width_in_mbs_minus1 = reader.read_ue()?;
     let pic_height_in_map_units_minus1 = reader.read_ue()?;
     let frame_mbs_only_flag = reader.read_bit()?;
-    
+
     let mut mb_adaptive_frame_field_flag = 0;
     if frame_mbs_only_flag == 0 {
         mb_adaptive_frame_field_flag = reader.read_bit()?;
     }
-    
+
     let direct_8x8_inference_flag = reader.read_bit()?;
     let frame_cropping_flag = reader.read_bit()?;
-    
+
     let mut frame_crop_left_offset = 0;
     let mut frame_crop_right_offset = 0;
     let mut frame_crop_top_offset = 0;
@@ -231,7 +253,8 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
 
     let vui_parameters_present_flag = reader.read_bit().unwrap_or(0);
 
-    let mut sps_flags: vk::native::StdVideoH264SpsFlags = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut sps_flags: vk::native::StdVideoH264SpsFlags =
+        unsafe { MaybeUninit::zeroed().assume_init() };
     sps_flags.set_direct_8x8_inference_flag(direct_8x8_inference_flag);
     sps_flags.set_mb_adaptive_frame_field_flag(mb_adaptive_frame_field_flag);
     sps_flags.set_frame_mbs_only_flag(frame_mbs_only_flag);
@@ -243,9 +266,10 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
     sps_flags.set_seq_scaling_matrix_present_flag(seq_scaling_matrix_present_flag);
     sps_flags.set_vui_parameters_present_flag(vui_parameters_present_flag);
 
-    let mut std_sps: vk::native::StdVideoH264SequenceParameterSet = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut std_sps: vk::native::StdVideoH264SequenceParameterSet =
+        unsafe { MaybeUninit::zeroed().assume_init() };
     std_sps.flags = sps_flags;
-    
+
     std_sps.profile_idc = match profile_idc {
         66 => vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_BASELINE,
         77 => vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_MAIN,
@@ -253,7 +277,7 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
         244 => vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_HIGH_444_PREDICTIVE,
         _ => vk::native::StdVideoH264ProfileIdc_STD_VIDEO_H264_PROFILE_IDC_INVALID,
     };
-    
+
     std_sps.level_idc = match level_idc {
         10 => vk::native::StdVideoH264LevelIdc_STD_VIDEO_H264_LEVEL_IDC_1_0,
         11 => vk::native::StdVideoH264LevelIdc_STD_VIDEO_H264_LEVEL_IDC_1_1,
@@ -276,7 +300,7 @@ pub fn parse_sps(extradata: &[u8]) -> Option<vk::native::StdVideoH264SequencePar
         62 => vk::native::StdVideoH264LevelIdc_STD_VIDEO_H264_LEVEL_IDC_6_2,
         _ => vk::native::StdVideoH264LevelIdc_STD_VIDEO_H264_LEVEL_IDC_INVALID,
     };
-    
+
     std_sps.chroma_format_idc = match chroma_format_idc {
         0 => vk::native::StdVideoH264ChromaFormatIdc_STD_VIDEO_H264_CHROMA_FORMAT_IDC_MONOCHROME,
         1 => vk::native::StdVideoH264ChromaFormatIdc_STD_VIDEO_H264_CHROMA_FORMAT_IDC_420,
@@ -321,23 +345,39 @@ pub fn parse_pps(extradata: &[u8]) -> Option<vk::native::StdVideoH264PicturePara
     let seq_parameter_set_id = reader.read_ue()?;
     let entropy_coding_mode_flag = reader.read_bit()?;
     let bottom_field_pic_order_in_frame_present_flag = reader.read_bit()?;
-    
+
     let num_slice_groups_minus1 = reader.read_ue()?;
     if num_slice_groups_minus1 > 0 {
         let slice_group_map_type = reader.read_ue()?;
         if slice_group_map_type == 0 {
-            for _ in 0..=num_slice_groups_minus1 { reader.read_ue()?; }
+            for _ in 0..=num_slice_groups_minus1 {
+                reader.read_ue()?;
+            }
         } else if slice_group_map_type == 2 {
-            for _ in 0..num_slice_groups_minus1 { reader.read_ue()?; reader.read_ue()?; }
-        } else if slice_group_map_type == 3 || slice_group_map_type == 4 || slice_group_map_type == 5 {
-            reader.read_bit()?; reader.read_ue()?;
+            for _ in 0..num_slice_groups_minus1 {
+                reader.read_ue()?;
+                reader.read_ue()?;
+            }
+        } else if slice_group_map_type == 3
+            || slice_group_map_type == 4
+            || slice_group_map_type == 5
+        {
+            reader.read_bit()?;
+            reader.read_ue()?;
         } else if slice_group_map_type == 6 {
             let pic_size_in_map_units_minus1 = reader.read_ue()?;
             let mut bits = 0;
             let mut val = num_slice_groups_minus1;
-            while val > 0 { bits += 1; val >>= 1; }
-            if bits == 0 { bits = 1; }
-            for _ in 0..=pic_size_in_map_units_minus1 { reader.read_bits(bits as usize)?; }
+            while val > 0 {
+                bits += 1;
+                val >>= 1;
+            }
+            if bits == 0 {
+                bits = 1;
+            }
+            for _ in 0..=pic_size_in_map_units_minus1 {
+                reader.read_bits(bits as usize)?;
+            }
         }
     }
 
@@ -359,15 +399,18 @@ pub fn parse_pps(extradata: &[u8]) -> Option<vk::native::StdVideoH264PicturePara
     if reader.has_more_rbsp_data() {
         transform_8x8_mode_flag = reader.read_bit()?;
         pic_scaling_matrix_present_flag = reader.read_bit()?;
-        
+
         if !(pic_scaling_matrix_present_flag == 1) {
             second_chroma_qp_index_offset = reader.read_se().unwrap_or(chroma_qp_index_offset);
         }
     }
 
-    let mut pps_flags: vk::native::StdVideoH264PpsFlags = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut pps_flags: vk::native::StdVideoH264PpsFlags =
+        unsafe { MaybeUninit::zeroed().assume_init() };
     pps_flags.set_entropy_coding_mode_flag(entropy_coding_mode_flag);
-    pps_flags.set_bottom_field_pic_order_in_frame_present_flag(bottom_field_pic_order_in_frame_present_flag);
+    pps_flags.set_bottom_field_pic_order_in_frame_present_flag(
+        bottom_field_pic_order_in_frame_present_flag,
+    );
     pps_flags.set_weighted_pred_flag(weighted_pred_flag);
     pps_flags.set_deblocking_filter_control_present_flag(deblocking_filter_control_present_flag);
     pps_flags.set_constrained_intra_pred_flag(constrained_intra_pred_flag);
@@ -375,20 +418,21 @@ pub fn parse_pps(extradata: &[u8]) -> Option<vk::native::StdVideoH264PicturePara
     pps_flags.set_transform_8x8_mode_flag(transform_8x8_mode_flag);
     pps_flags.set_pic_scaling_matrix_present_flag(pic_scaling_matrix_present_flag);
 
-    let mut std_pps: vk::native::StdVideoH264PictureParameterSet = unsafe { MaybeUninit::zeroed().assume_init() };
+    let mut std_pps: vk::native::StdVideoH264PictureParameterSet =
+        unsafe { MaybeUninit::zeroed().assume_init() };
     std_pps.flags = pps_flags;
     std_pps.pic_parameter_set_id = pic_parameter_set_id as u8;
     std_pps.seq_parameter_set_id = seq_parameter_set_id as u8;
     std_pps.num_ref_idx_l0_default_active_minus1 = num_ref_idx_l0_default_active_minus1 as u8;
     std_pps.num_ref_idx_l1_default_active_minus1 = num_ref_idx_l1_default_active_minus1 as u8;
-    
+
     std_pps.weighted_bipred_idc = match weighted_bipred_idc {
         0 => vk::native::StdVideoH264WeightedBipredIdc_STD_VIDEO_H264_WEIGHTED_BIPRED_IDC_DEFAULT,
         1 => vk::native::StdVideoH264WeightedBipredIdc_STD_VIDEO_H264_WEIGHTED_BIPRED_IDC_EXPLICIT,
         2 => vk::native::StdVideoH264WeightedBipredIdc_STD_VIDEO_H264_WEIGHTED_BIPRED_IDC_IMPLICIT,
         _ => vk::native::StdVideoH264WeightedBipredIdc_STD_VIDEO_H264_WEIGHTED_BIPRED_IDC_INVALID,
     };
-    
+
     std_pps.pic_init_qp_minus26 = pic_init_qp_minus26 as i8;
     std_pps.pic_init_qs_minus26 = pic_init_qs_minus26 as i8;
     std_pps.chroma_qp_index_offset = chroma_qp_index_offset as i8;
