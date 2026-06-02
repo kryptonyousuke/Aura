@@ -70,8 +70,7 @@ impl Pipeline for Aura {
             .descriptor_pool(descriptor_pool)
             .set_layouts(layouts);
         log::debug!("Allocating descriptor set.");
-        let descriptor_sets = unsafe { device.allocate_descriptor_sets(&allocate_info).unwrap() };
-        descriptor_sets
+        unsafe { device.allocate_descriptor_sets(&allocate_info).unwrap() }
     }
 
     fn update_video_descriptor_set(

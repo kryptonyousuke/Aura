@@ -82,7 +82,7 @@ impl Aura {
             video_instance_ext
                 .get_physical_device_video_format_properties_len(physical_device, &format_info)
         };
-        log::info!("-------- GPU's supported formats for {identifier} ---------",);
+        log::info!("-------- GPU's supported formats for {identifier} ---------");
 
         if supported_formats_len_result.is_ok() {
             let mut supported_formats: Vec<vk::VideoFormatPropertiesKHR> = vec![
