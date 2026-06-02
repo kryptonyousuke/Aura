@@ -117,7 +117,7 @@ impl Aura {
             vec![]
         };
         let layers_pointers: Vec<*const std::os::raw::c_char> =
-            layer_names.to_vec();
+            layer_names.iter().copied().collect();
         let mut required_instance_extensions: Vec<&CStr> =
             ash_window::enumerate_required_extensions(window.display_handle().unwrap().as_raw())
                 .expect("Failed to retrieve window extensions.")
