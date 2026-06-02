@@ -1,9 +1,11 @@
+use std::ffi::CStr;
+
 use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
 use crate::vulkan::photon::h264::H264Decoder;
 use crate::vulkan::vk_init::Aura;
 use super::types::PhotonError;
 use ash::khr::video_queue;
-use ash::vk::{TaggedStructure};
+use ash::vk::{TaggedStructure, make_api_version};
 use ash::{Device, Instance, vk, khr::{video_decode_queue::Device as VideoDecodeLoader}};
 use anyhow::Result;
 
@@ -138,6 +140,8 @@ impl Decoder for Aura {
         reference_picture_format: vk::Format
     ) -> Result<vk::VideoSessionKHR, PhotonError> {
         if let Some(profile_idc) = profile_idc {
+            let mut extension_name: &CStr = c"";
+            
             let mut h264_profile = vk::VideoDecodeH264ProfileInfoKHR::default()
                 .std_profile_idc(profile_idc.as_raw());
             let mut h265_profile = vk::VideoDecodeH265ProfileInfoKHR::default()
@@ -151,21 +155,17 @@ impl Decoder for Aura {
                 .chroma_bit_depth(chroma_depth);
             if codec_operation == vk::VideoCodecOperationFlagsKHR::DECODE_H264 {
                 video_profile = video_profile.push(&mut h264_profile);
+                extension_name = c"VK_STD_vulkan_video_codec_h264_decode";
             } else if codec_operation == vk::VideoCodecOperationFlagsKHR::DECODE_H265 {
                 video_profile = video_profile.push(&mut h265_profile);
+                extension_name = c"VK_STD_vulkan_video_codec_h265_decode";
             } else if codec_operation == vk::VideoCodecOperationFlagsKHR::DECODE_AV1 {
-                video_profile = video_profile.push(&mut av1_profile)
+                video_profile = video_profile.push(&mut av1_profile);
+                extension_name = c"VK_STD_vulkan_video_codec_av1_decode";
             }
-            let mut header_version = vk::ExtensionProperties::default();
-            let name = c"VK_STD_vulkan_video_codec_h264_decode"; // still hardcoded!
-            for (dest, &src) in header_version
-                .extension_name
-                .iter_mut()
-                .zip(name.to_bytes_with_nul())
-            {
-                *dest = src as i8;
-            }
-            header_version.spec_version = vk::make_api_version(0, 1, 0, 0);
+            let mut header_version = vk::ExtensionProperties::default()
+                .spec_version(make_api_version(0, 1, 0, 0))
+                .extension_name(extension_name).unwrap();
             let create_info = vk::VideoSessionCreateInfoKHR::default()
                 .queue_family_index(video_queue_index)
                 .video_profile(&video_profile)
