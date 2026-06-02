@@ -269,8 +269,7 @@ impl Aura {
                 match (*raw_params).format {
                     format if format == AVPixelFormat::AV_PIX_FMT_YUV420P as i32 || 
                         format == AVPixelFormat::AV_PIX_FMT_YUVJ420P as i32 ||
-                        format == AVPixelFormat::AV_PIX_FMT_NV12 as i32 ||
-                        format == AVPixelFormat::AV_PIX_FMT_P010LE as i32 => {
+                        format == AVPixelFormat::AV_PIX_FMT_NV12 as i32 => {
                             (
                                 vk::VideoChromaSubsamplingFlagsKHR::TYPE_420,
                                 vk::VideoComponentBitDepthFlagsKHR::TYPE_8,

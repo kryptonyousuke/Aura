@@ -1,10 +1,9 @@
 use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
 use crate::vulkan::photon::h264::H264Decoder;
 use crate::vulkan::vk_init::Aura;
-use super::types::VideoCodecsProfiles::{self, H264Profiles, H265Profiles, AV1Profiles};
 use super::types::PhotonError;
 use ash::khr::video_queue;
-use ash::vk::{TaggedStructure, VideoCodecOperationFlagsKHR};
+use ash::vk::{TaggedStructure};
 use ash::{Device, Instance, vk, khr::{video_decode_queue::Device as VideoDecodeLoader}};
 use anyhow::Result;
 
@@ -158,7 +157,7 @@ impl Decoder for Aura {
                 video_profile = video_profile.push(&mut av1_profile)
             }
             let mut header_version = vk::ExtensionProperties::default();
-            let name = c"VK_STD_vulkan_video_codec_h264_decode";
+            let name = c"VK_STD_vulkan_video_codec_h264_decode"; // still hardcoded!
             for (dest, &src) in header_version
                 .extension_name
                 .iter_mut()
