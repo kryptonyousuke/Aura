@@ -23,7 +23,7 @@ pub struct DecodingSession {
 
 /// Essential functions to any decoding session.
 pub trait Decoder {
-    /// Creates a vulkan video session or returns a ´PhotonError´.
+    /// Creates a vulkan video session or returns a `PhotonError`.
     fn create_video_session(
         instance: &Instance,
         device: &Device,
