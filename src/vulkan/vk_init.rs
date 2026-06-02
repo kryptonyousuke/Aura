@@ -117,7 +117,7 @@ impl Aura {
             vec![]
         };
         let layers_pointers: Vec<*const std::os::raw::c_char> =
-            layer_names.iter().copied().map(|name| name).collect();
+            layer_names.iter().copied().collect();
         let mut required_instance_extensions: Vec<&CStr> =
             ash_window::enumerate_required_extensions(window.display_handle().unwrap().as_raw())
                 .expect("Failed to retrieve window extensions.")
@@ -128,7 +128,7 @@ impl Aura {
         required_instance_extensions.push(vk::KHR_SURFACE_MAINTENANCE1_NAME);
         required_instance_extensions.push(vk::KHR_GET_SURFACE_CAPABILITIES2_NAME);
         Self::log_instance_extensions(&entry, &required_instance_extensions);
-        let extension_pointers: Vec<*const i8> = required_instance_extensions
+        let extension_pointers: Vec<*const std::os::raw::c_char> = required_instance_extensions
             .iter()
             .map(|cstr| cstr.as_ptr())
             .collect();
