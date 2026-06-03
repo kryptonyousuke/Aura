@@ -16,6 +16,7 @@ pub trait H264Decoder {
         is_first_frame: bool,
         sps: &vk::native::StdVideoH264SequenceParameterSet,
     );
+    fn present_swapchain(&mut self, swapchain_available_image_idx: u32);
     unsafe fn create_h264_session_parameters(
         device: &Device,
         video_loader: &video_queue::Device,
@@ -408,24 +409,30 @@ impl H264Decoder for Aura {
                 )
                 .unwrap();
 
-            let swapchains = [self.swapchain];
-            let image_indices_available_for_present = [swapchain_available_image_idx];
-            let present_wait_semaphores =
-                [self.graphics_complete_semaphores[swapchain_available_image_idx as usize]];
-
-            let present_info = vk::PresentInfoKHR::default()
-                .wait_semaphores(&present_wait_semaphores)
-                .swapchains(&swapchains)
-                .image_indices(&image_indices_available_for_present);
-
-            self.swapchain_loader
-                .queue_present(self.graphics_queue, &present_info)
-                .unwrap();
-
             log::debug!("Frame was sent to vulkan!");
+            self.present_swapchain(swapchain_available_image_idx);
             self.current_frame_count_idx += 1;
         }
     }
+
+    fn present_swapchain(&mut self, swapchain_available_image_idx: u32) {
+        let swapchains = [self.swapchain];
+        let image_indices_available_for_present = [swapchain_available_image_idx];
+        let present_wait_semaphores =
+            [self.graphics_complete_semaphores[swapchain_available_image_idx as usize]];
+
+        let present_info = vk::PresentInfoKHR::default()
+            .wait_semaphores(&present_wait_semaphores)
+            .swapchains(&swapchains)
+            .image_indices(&image_indices_available_for_present);
+
+        unsafe {
+            self.swapchain_loader
+                .queue_present(self.graphics_queue, &present_info)
+                .unwrap()
+        };
+    }
+
     /// Make h264 session params.
     unsafe fn create_h264_session_parameters(
         _device: &Device,
