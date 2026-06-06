@@ -132,6 +132,21 @@ impl DecodingInstance {
             video_extent,
         )?;
 
+        let mut bitstream_sizes = vec![0_u32; frames_in_flight as usize];
+        for i in 0..frames_in_flight {
+            let (bitstream_buffer, bitstream_memory, bitstream_size) =
+                Self::create_bitstream_buffer(
+                    &instance,
+                    &video_ext,
+                    physical_device,
+                    &device,
+                    &video_profile,
+                );
+            bitstream_buffers[i as usize] = bitstream_buffer;
+            bitstream_memories[i as usize] = bitstream_memory;
+            bitstream_sizes[i as usize] = bitstream_size;
+        }
+
         let decoding_instance = Self {
             _graphics_queue_family_index: _graphics_queue_family_index,
             _video_queue_family_index: _video_queue_family_index,
@@ -148,7 +163,7 @@ impl DecodingInstance {
             video_session: decoding_session,
             bitstream_buffers: bitstream_buffers,
             bitstream_memories: bitstream_memories,
-            bitstream_sizes: vec![],
+            bitstream_sizes: bitstream_sizes,
 
             video_command_buffers: video_command_buffers,
             graphics_command_buffers: graphics_command_buffers,
@@ -163,7 +178,7 @@ impl DecodingInstance {
             swapchain: swapchain,
             frames_in_flight: frames_in_flight,
 
-            dpb_frame_nums: vec![],
+            dpb_frame_nums: vec![0u16; frames_in_flight],
             dpb_pool: dpb_pool,
             dst_pool: dst_pool,
             dpb_pool_size: dpb_pool_size,
