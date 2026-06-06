@@ -55,11 +55,11 @@ impl H264Decoder for DecodingInstance {
                     true,
                     u64::MAX,
                 )
-                .unwrap();
+                ?;
             let () = self
                 .device
                 .reset_fences(&[self.video_fences[frames_in_flight_sync_idx]])
-                .unwrap();
+                ?;
             let color_attachment_info = vk::RenderingAttachmentInfoKHR::default()
                 .image_view(
                     self.target_image_views[self
@@ -93,13 +93,13 @@ impl H264Decoder for DecodingInstance {
                     self.video_command_buffers[frames_in_flight_sync_idx],
                     &begin_info,
                 )
-                .unwrap();
+                ?;
 
             let subresource_range = vk::ImageSubresourceRange::default()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
                 .base_mip_level(0)
                 .level_count(1)
-                .base_array_layer(u32::try_from(frame_idx).unwrap())
+                .base_array_layer(u32::try_from(frame_idx)?)
                 .layer_count(1);
             let swapchain_subresource_range = vk::ImageSubresourceRange::default()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -163,7 +163,7 @@ impl H264Decoder for DecodingInstance {
                 let sps_info = super::super::util::converter::SpsInfo {
                     log2_max_frame_num_minus4: sps.log2_max_frame_num_minus4,
                     frame_mbs_only_flag: sps.flags.frame_mbs_only_flag() != 0,
-                    pic_order_cnt_type: u8::try_from(sps.pic_order_cnt_type).unwrap(),
+                    pic_order_cnt_type: u8::try_from(sps.pic_order_cnt_type)?,
                     log2_max_pic_order_cnt_lsb_minus4: sps.log2_max_pic_order_cnt_lsb_minus4,
                 };
 
@@ -190,8 +190,8 @@ impl H264Decoder for DecodingInstance {
                     );
                 } else {
                     log::warn!("Failed to parse slice_header, using linear fallback.");
-                    real_frame_num = u16::try_from(self.current_frame_count_idx % 16).unwrap();
-                    real_poc = i32::try_from(self.current_frame_count_idx).unwrap();
+                    real_frame_num = u16::try_from(self.current_frame_count_idx % 16)?;
+                    real_poc = i32::try_from(self.current_frame_count_idx)?;
                 }
 
                 std_pic_info.frame_num = real_frame_num;
@@ -216,7 +216,7 @@ impl H264Decoder for DecodingInstance {
                 .coded_extent(self.video_extent)
                 .base_array_layer(0);
             let setup_slot_decode = vk::VideoReferenceSlotInfoKHR::default()
-                .slot_index(i32::try_from(frame_idx).unwrap())
+                .slot_index(i32::try_from(frame_idx)?)
                 .picture_resource(&setup_resource)
                 .push(&mut h264_setup_slot_info_decode);
             let setup_slot_begin = vk::VideoReferenceSlotInfoKHR::default()
@@ -303,13 +303,13 @@ impl H264Decoder for DecodingInstance {
 
             self.device
                 .queue_submit2(self.video_queue, &[submit_info], vk::Fence::null())
-                .unwrap();
+                ?;
             self.device
                 .begin_command_buffer(
                     self.graphics_command_buffers[frames_in_flight_sync_idx],
                     &vk::CommandBufferBeginInfo::default(),
                 )
-                .unwrap();
+                ?;
 
             DecodingInstance::acquire_image_dst_on_graphic(
                 &self.device,
@@ -414,7 +414,7 @@ impl H264Decoder for DecodingInstance {
 
             self.device
                 .end_command_buffer(self.graphics_command_buffers[frames_in_flight_sync_idx])
-                .unwrap();
+                ?;
             let cmd_buf_graphics_complete_infos = [vk::SemaphoreSubmitInfo::default().semaphore(
                 self.graphics_complete_semaphores[self
                     .target_available_image_idx
@@ -431,7 +431,7 @@ impl H264Decoder for DecodingInstance {
                     &[graphics_submit],
                     self.video_fences[frames_in_flight_sync_idx],
                 )
-                .unwrap();
+                ?;
 
             log::debug!("Frame was sent to vulkan!");
             self.present_swapchain();
