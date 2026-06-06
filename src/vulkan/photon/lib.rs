@@ -87,7 +87,7 @@ impl DecodingInstance {
         video_profile: &mut vk::VideoProfileInfoKHR,
         ycbcr_conversion: vk::SamplerYcbcrConversion,
         extradata: &[u8],
-    ) -> Result<Self, PhotonError> {
+    ) -> Result<Self> {
         let mut bitstream_buffers = vec![vk::Buffer::null(); frames_in_flight];
         let mut bitstream_memories = vec![vk::DeviceMemory::null(); frames_in_flight];
         let mut bitstream_sizes = vec![0_u32; frames_in_flight];
@@ -118,7 +118,7 @@ impl DecodingInstance {
             vk::VideoChromaSubsamplingFlagsKHR::TYPE_420,
             dpb_format,
             dst_format,
-        );
+        )?;
 
         let (dpb_pool, dst_pool) = Self::create_dpb_dst_pool(
             instance,
@@ -130,7 +130,7 @@ impl DecodingInstance {
             dpb_format,
             dst_format,
             video_extent,
-        );
+        )?;
 
         let decoding_instance = Self {
             _graphics_queue_family_index: _graphics_queue_family_index,
