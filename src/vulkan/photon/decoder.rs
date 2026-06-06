@@ -16,7 +16,7 @@ use ash::{Device, Instance, khr::video_decode_queue::Device as VideoDecodeLoader
 pub struct DecodingSession {
     pub(crate) session: vk::VideoSessionKHR,
     pub(crate) _session_memories: Vec<vk::DeviceMemory>,
-    pub(crate) video_loader: video_queue::Device,
+    pub(crate) video_device: video_queue::Device,
     pub(crate) decode_loader: VideoDecodeLoader,
     pub(crate) session_parameters: vk::VideoSessionParametersKHR,
 }
@@ -349,7 +349,7 @@ impl Decoder for Aura {
         picture_format: vk::Format,
         reference_picture_format: vk::Format,
     ) -> DecodingSession {
-        let video_loader = video_queue::Device::load(instance, device);
+        let video_device = video_queue::Device::load(instance, device);
         let decode_loader = VideoDecodeLoader::load(instance, device);
 
         let session = Aura::create_video_session(
@@ -367,21 +367,21 @@ impl Decoder for Aura {
         .unwrap();
 
         let session_parameters = unsafe {
-            Aura::create_h264_session_parameters(device, &video_loader, extradata, session)
+            Aura::create_h264_session_parameters(device, &video_device, extradata, session)
         };
 
         let session_memories = Aura::allocate_video_session_memories(
             instance,
             physical_device,
             device,
-            &video_loader,
+            &video_device,
             session,
         );
 
         DecodingSession {
             session: session,
             _session_memories: session_memories,
-            video_loader: video_loader,
+            video_device: video_device,
             decode_loader: decode_loader,
             session_parameters: session_parameters,
         }

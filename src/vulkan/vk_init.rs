@@ -38,7 +38,7 @@ pub struct Aura {
     pub bitstream_buffers: [vk::Buffer; FRAMES_IN_FLIGHT as usize],
     pub bitstream_memories: [vk::DeviceMemory; FRAMES_IN_FLIGHT as usize],
     pub bitstream_sizes: [u32; FRAMES_IN_FLIGHT as usize],
-    pub video_loader: video_queue::Device,
+    pub video_device: video_queue::Device,
     pub decode_loader: VideoDecodeLoader,
 
     pub graphics_queue: vk::Queue,
@@ -433,7 +433,7 @@ impl Aura {
         let DecodingSession {
             session,
             _session_memories,
-            video_loader,
+            video_device,
             decode_loader,
             session_parameters,
         } = Self::setup_decoder(
@@ -618,7 +618,7 @@ impl Aura {
             bitstream_buffers: bitstream_buffers,
             bitstream_memories: bitstream_memories,
             bitstream_sizes: bitstream_sizes,
-            video_loader: video_loader,
+            video_device: video_device,
             decode_loader: decode_loader,
             ycbcr_conversion: ycbcr_conversion,
             video_command_buffers: video_command_buffers,
@@ -755,12 +755,12 @@ impl Drop for Aura {
             }
 
             if self.session_parameters != vk::VideoSessionParametersKHR::null() {
-                self.video_loader
+                self.video_device
                     .destroy_video_session_parameters(self.session_parameters, None);
                 self.session_parameters = vk::VideoSessionParametersKHR::null();
             }
             if self.session != vk::VideoSessionKHR::null() {
-                self.video_loader.destroy_video_session(self.session, None);
+                self.video_device.destroy_video_session(self.session, None);
                 self.session = vk::VideoSessionKHR::null();
             }
             for mem in &self._session_memories {

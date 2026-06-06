@@ -228,7 +228,7 @@ impl H264Decoder for Aura {
                 .video_session_parameters(self.session_parameters)
                 .reference_slots(&coding_reference_slots);
 
-            self.video_loader.cmd_begin_video_coding(
+            self.video_device.cmd_begin_video_coding(
                 self.video_command_buffers[swapchain_sync_idx],
                 &begin_coding_info,
             );
@@ -236,7 +236,7 @@ impl H264Decoder for Aura {
             if is_first_frame {
                 let control_info = vk::VideoCodingControlInfoKHR::default()
                     .flags(vk::VideoCodingControlFlagsKHR::RESET);
-                self.video_loader.cmd_control_video_coding(
+                self.video_device.cmd_control_video_coding(
                     self.video_command_buffers[swapchain_sync_idx],
                     &control_info,
                 );
@@ -261,7 +261,7 @@ impl H264Decoder for Aura {
                 .cmd_decode_video(self.video_command_buffers[swapchain_sync_idx], &decode_info);
 
             // End coding session and submit execution
-            self.video_loader.cmd_end_video_coding(
+            self.video_device.cmd_end_video_coding(
                 self.video_command_buffers[swapchain_sync_idx],
                 &vk::VideoEndCodingInfoKHR::default(),
             );
@@ -283,7 +283,7 @@ impl H264Decoder for Aura {
                 .semaphore(self.render_complete_semaphores[swapchain_available_image_idx as usize])
                 .stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)];
             let present_semaphores_submit_info = &[vk::SemaphoreSubmitInfo::default()
-                .semaphore(self.present_complete_semaphores[swapchain_sync_idx as usize])
+                .semaphore(self.present_complete_semaphores[swapchain_sync_idx])
                 .stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)];
             let submit_info = vk::SubmitInfo2::default()
                 .command_buffer_infos(video_command_buffer_submit_info)
