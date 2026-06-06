@@ -1,9 +1,11 @@
 //! # H264 decoder
 //! Deals with the logic of the decoding pípeline.
 
-use super::decoder::Decoder;
+use super::super::decoder::Decoder;
+use super::super::lib::DecodingInstance;
 use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::vk_init::Aura;
+use anyhow::Result;
 use ash::khr::video_queue;
 use ash::vk::TaggedStructure;
 use ash::{Device, vk};
@@ -15,8 +17,8 @@ pub trait H264Decoder {
         slice_offsets: &[u32],
         is_first_frame: bool,
         sps: &vk::native::StdVideoH264SequenceParameterSet,
-    );
-    fn present_swapchain(&mut self, swapchain_available_image_idx: u32);
+    ) -> Result<()>;
+    fn present_swapchain(&mut self);
     unsafe fn create_h264_session_parameters(
         device: &Device,
         video_loader: &video_queue::Device,
@@ -24,47 +26,47 @@ pub trait H264Decoder {
         session: vk::VideoSessionKHR,
     ) -> vk::VideoSessionParametersKHR;
 }
-impl H264Decoder for Aura {
-    /// Decodes a h264 frame.
+impl H264Decoder for DecodingInstance {
+    /// Decodes a h264 frame and write it into a target image.
     fn decode_frame(
         &mut self,
         bitstream_data: &[u8],
         slice_offsets: &[u32],
         is_first_frame: bool,
         sps: &vk::native::StdVideoH264SequenceParameterSet,
-    ) {
+    ) -> Result<()> {
         let frame_idx = self.current_frame_count_idx % self.dpb_pool_size;
         let (dst_image, _, dst_view) = self.dst_pool[frame_idx];
         let (_dpb_image, _, dpb_view) = self.dpb_pool[frame_idx];
         log::debug!("current_frame_count_idx: {}", self.current_frame_count_idx);
         log::debug!("dpb_pool_size: {}", self.dpb_pool_size);
         log::debug!("frame_idx: {frame_idx}");
-        let swapchain_sync_idx =
+        let frames_in_flight_sync_idx =
             (self.current_frame_count_idx % self.frames_in_flight as usize) as usize;
-        let aligned_size = self.bitstream_sizes[swapchain_sync_idx];
+        let aligned_size = self.bitstream_sizes[frames_in_flight_sync_idx];
         unsafe {
-            self.upload_bitstream_packet(bitstream_data, swapchain_sync_idx);
+            self.upload_bitstream_packet(bitstream_data, frames_in_flight_sync_idx);
 
-            log::debug!("swapchain_sync_idx: {swapchain_sync_idx}");
+            log::debug!("frames_in_flight_sync_idx: {frames_in_flight_sync_idx}");
             let () = self
                 .device
-                .wait_for_fences(&[self.render_fences[swapchain_sync_idx]], true, u64::MAX)
-                .unwrap();
-            let () = self
-                .device
-                .reset_fences(&[self.render_fences[swapchain_sync_idx]])
-                .unwrap();
-            let (swapchain_available_image_idx, _is_suboptimal) = self
-                .swapchain_loader
-                .acquire_next_image(
-                    self.swapchain,
+                .wait_for_fences(
+                    &[self.video_fences[frames_in_flight_sync_idx]],
+                    true,
                     u64::MAX,
-                    self.present_complete_semaphores[swapchain_sync_idx],
-                    vk::Fence::null(),
                 )
                 .unwrap();
+            let () = self
+                .device
+                .reset_fences(&[self.video_fences[frames_in_flight_sync_idx]])
+                .unwrap();
             let color_attachment_info = vk::RenderingAttachmentInfoKHR::default()
-                .image_view(self.swapchain_image_views[swapchain_available_image_idx as usize])
+                .image_view(
+                    self.target_image_views[self
+                        .target_available_image_idx
+                        .expect("Can't get the target available image index.")
+                        as usize],
+                )
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
@@ -79,7 +81,7 @@ impl H264Decoder for Aura {
             let rendering_info = vk::RenderingInfoKHR::default()
                 .render_area(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: self.swapchain_extent,
+                    extent: self.render_extent,
                 })
                 .layer_count(1)
                 .color_attachments(&color_attachments);
@@ -87,7 +89,10 @@ impl H264Decoder for Aura {
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
 
             self.device
-                .begin_command_buffer(self.video_command_buffers[swapchain_sync_idx], &begin_info)
+                .begin_command_buffer(
+                    self.video_command_buffers[frames_in_flight_sync_idx],
+                    &begin_info,
+                )
                 .unwrap();
 
             let subresource_range = vk::ImageSubresourceRange::default()
@@ -111,7 +116,7 @@ impl H264Decoder for Aura {
                 .dst_access_mask(vk::AccessFlags2::VIDEO_DECODE_READ_KHR)
                 .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
                 .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                .buffer(self.bitstream_buffers[swapchain_sync_idx])
+                .buffer(self.bitstream_buffers[frames_in_flight_sync_idx])
                 .offset(0)
                 .size(vk::WHOLE_SIZE)];
             let image_barriers = [
@@ -139,7 +144,7 @@ impl H264Decoder for Aura {
                 .buffer_memory_barriers(&buffer_barriers);
 
             self.device.cmd_pipeline_barrier2(
-                self.video_command_buffers[swapchain_sync_idx],
+                self.video_command_buffers[frames_in_flight_sync_idx],
                 &dependency_info,
             );
             let slice_offset = slice_offsets[0] as usize;
@@ -148,20 +153,21 @@ impl H264Decoder for Aura {
                 MaybeUninit::zeroed().assume_init();
             let mut real_frame_num = 0;
             let mut real_poc = 0;
-            if let Some(nalu_header) = crate::video::converter::NaluHeader::parse(slice_data) {
+            if let Some(nalu_header) = super::super::util::converter::NaluHeader::parse(slice_data)
+            {
                 log::debug!("NALU Parsed: {nalu_header:?}");
                 let is_reference = nalu_header.nal_ref_idc > 0;
                 let is_idr = nalu_header.nal_unit_type == 5;
                 std_pic_info.flags.set_IdrPicFlag(u32::from(is_idr));
                 std_pic_info.flags.set_is_reference(u32::from(is_reference));
-                let sps_info = crate::video::converter::SpsInfo {
+                let sps_info = super::super::util::converter::SpsInfo {
                     log2_max_frame_num_minus4: sps.log2_max_frame_num_minus4,
                     frame_mbs_only_flag: sps.flags.frame_mbs_only_flag() != 0,
                     pic_order_cnt_type: u8::try_from(sps.pic_order_cnt_type).unwrap(),
                     log2_max_pic_order_cnt_lsb_minus4: sps.log2_max_pic_order_cnt_lsb_minus4,
                 };
 
-                if let Some(slice_header) = crate::video::converter::parse_slice_header(
+                if let Some(slice_header) = super::super::util::converter::parse_slice_header(
                     &slice_data[nalu_header.slice_header_offset..],
                     nalu_header.nal_unit_type,
                     &sps_info,
@@ -218,27 +224,25 @@ impl H264Decoder for Aura {
                 .picture_resource(&setup_resource)
                 .push(&mut h264_setup_slot_info_begin);
 
-            let mut reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = Vec::new();
-
-            let mut coding_reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> =
-                vec![setup_slot_begin];
+            let reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = Vec::new();
+            let coding_reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = vec![setup_slot_begin];
 
             // Start the coding session
             let begin_coding_info = vk::VideoBeginCodingInfoKHR::default()
-                .video_session(self.session)
-                .video_session_parameters(self.session_parameters)
+                .video_session(self.video_session.session)
+                .video_session_parameters(self.video_session.session_parameters)
                 .reference_slots(&coding_reference_slots);
 
-            self.video_loader.cmd_begin_video_coding(
-                self.video_command_buffers[swapchain_sync_idx],
+            self.video_session.video_loader.cmd_begin_video_coding(
+                self.video_command_buffers[frames_in_flight_sync_idx],
                 &begin_coding_info,
             );
 
             if is_first_frame {
                 let control_info = vk::VideoCodingControlInfoKHR::default()
                     .flags(vk::VideoCodingControlFlagsKHR::RESET);
-                self.video_loader.cmd_control_video_coding(
-                    self.video_command_buffers[swapchain_sync_idx],
+                self.video_session.video_loader.cmd_control_video_coding(
+                    self.video_command_buffers[frames_in_flight_sync_idx],
                     &control_info,
                 );
             }
@@ -250,7 +254,7 @@ impl H264Decoder for Aura {
                 .base_array_layer(0);
 
             let decode_info = vk::VideoDecodeInfoKHR::default()
-                .src_buffer(self.bitstream_buffers[swapchain_sync_idx])
+                .src_buffer(self.bitstream_buffers[frames_in_flight_sync_idx])
                 .src_buffer_offset(0)
                 .src_buffer_range(u64::from(aligned_size))
                 .dst_picture_resource(dst_resource)
@@ -258,37 +262,43 @@ impl H264Decoder for Aura {
                 .reference_slots(&reference_slots)
                 .push(&mut h264_decode_info);
 
-            self.decode_loader
-                .cmd_decode_video(self.video_command_buffers[swapchain_sync_idx], &decode_info);
+            self.video_session.decode_loader.cmd_decode_video(
+                self.video_command_buffers[frames_in_flight_sync_idx],
+                &decode_info,
+            );
 
             // End coding session and submit execution
-            self.video_loader.cmd_end_video_coding(
-                self.video_command_buffers[swapchain_sync_idx],
+            self.video_session.video_loader.cmd_end_video_coding(
+                self.video_command_buffers[frames_in_flight_sync_idx],
                 &vk::VideoEndCodingInfoKHR::default(),
             );
-            Aura::release_dst_on_graphic(
+            DecodingInstance::release_dst_on_graphic(
                 &self.device,
-                self.video_command_buffers[swapchain_sync_idx],
+                self.video_command_buffers[frames_in_flight_sync_idx],
                 dst_image,
                 subresource_range,
                 self._video_queue_family_index,
                 self._graphics_queue_family_index,
             );
             self.device
-                .end_command_buffer(self.video_command_buffers[swapchain_sync_idx])
+                .end_command_buffer(self.video_command_buffers[frames_in_flight_sync_idx])
                 .expect("Erro buffer");
 
             let video_command_buffer_submit_info = &[vk::CommandBufferSubmitInfo::default()
-                .command_buffer(self.video_command_buffers[swapchain_sync_idx])];
+                .command_buffer(self.video_command_buffers[frames_in_flight_sync_idx])];
             let render_semaphores_submit_info = &[vk::SemaphoreSubmitInfo::default()
-                .semaphore(self.render_complete_semaphores[swapchain_available_image_idx as usize])
+                .semaphore(
+                    self.decode_complete_semaphores[self
+                        .target_available_image_idx
+                        .expect("Can't get the target available image index.")
+                        as usize],
+                )
                 .stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)];
-            let present_semaphores_submit_info = &[vk::SemaphoreSubmitInfo::default()
-                .semaphore(self.present_complete_semaphores[swapchain_sync_idx as usize])
-                .stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)];
+            let wait_to_decode_semaphores_submit_info = &[vk::SemaphoreSubmitInfo::default()
+                .semaphore(self.wait_to_decode_semaphores[frames_in_flight_sync_idx as usize])];
             let submit_info = vk::SubmitInfo2::default()
                 .command_buffer_infos(video_command_buffer_submit_info)
-                .wait_semaphore_infos(present_semaphores_submit_info)
+                .wait_semaphore_infos(wait_to_decode_semaphores_submit_info)
                 .signal_semaphore_infos(render_semaphores_submit_info);
 
             self.device
@@ -296,14 +306,14 @@ impl H264Decoder for Aura {
                 .unwrap();
             self.device
                 .begin_command_buffer(
-                    self.graphics_command_buffers[swapchain_sync_idx],
+                    self.graphics_command_buffers[frames_in_flight_sync_idx],
                     &vk::CommandBufferBeginInfo::default(),
                 )
                 .unwrap();
 
-            Aura::acquire_image_dst_on_graphic(
+            DecodingInstance::acquire_image_dst_on_graphic(
                 &self.device,
-                self.graphics_command_buffers[swapchain_sync_idx],
+                self.graphics_command_buffers[frames_in_flight_sync_idx],
                 dst_image,
                 subresource_range,
                 self._video_queue_family_index,
@@ -311,54 +321,57 @@ impl H264Decoder for Aura {
             );
 
             self.device.cmd_bind_pipeline(
-                self.graphics_command_buffers[swapchain_sync_idx],
+                self.graphics_command_buffers[frames_in_flight_sync_idx],
                 vk::PipelineBindPoint::GRAPHICS,
                 self.pipeline,
             );
-            let descriptor_sets = [self.descriptor_sets[swapchain_sync_idx]];
+            let descriptor_sets = [self.descriptor_sets[frames_in_flight_sync_idx]];
             let bind_descriptor_sets_info = vk::BindDescriptorSetsInfo::default()
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .descriptor_sets(&descriptor_sets)
                 .layout(self.pipeline_layout);
 
             self.device.cmd_bind_descriptor_sets2(
-                self.graphics_command_buffers[swapchain_sync_idx],
+                self.graphics_command_buffers[frames_in_flight_sync_idx],
                 &bind_descriptor_sets_info,
             );
             Aura::update_video_descriptor_set(
                 &self.device,
-                self.descriptor_sets[swapchain_sync_idx],
+                self.descriptor_sets[frames_in_flight_sync_idx],
                 dst_view,
             );
 
-            Aura::acquire_swapchain_barrier(
+            DecodingInstance::acquire_target_barrier(
                 &self.device,
-                self.graphics_command_buffers[swapchain_sync_idx],
-                self.swapchain_images[swapchain_available_image_idx as usize],
+                self.graphics_command_buffers[frames_in_flight_sync_idx],
+                self.target_images[self
+                    .target_available_image_idx
+                    .expect("Can't get the target available image index.")
+                    as usize],
                 swapchain_subresource_range,
                 self._graphics_queue_family_index,
             );
 
             // Dynamic Rendering
             self.device.cmd_begin_rendering(
-                self.graphics_command_buffers[swapchain_sync_idx],
+                self.graphics_command_buffers[frames_in_flight_sync_idx],
                 &rendering_info,
             );
             let viewport = [self.viewport];
             let scissor = [self.scissor];
             self.device.cmd_set_viewport(
-                self.graphics_command_buffers[swapchain_sync_idx],
+                self.graphics_command_buffers[frames_in_flight_sync_idx],
                 0,
                 &viewport,
             );
             self.device.cmd_set_scissor(
-                self.graphics_command_buffers[swapchain_sync_idx],
+                self.graphics_command_buffers[frames_in_flight_sync_idx],
                 0,
                 &scissor,
             );
 
             self.device.cmd_draw(
-                self.graphics_command_buffers[swapchain_sync_idx],
+                self.graphics_command_buffers[frames_in_flight_sync_idx],
                 3,
                 1,
                 0,
@@ -366,36 +379,47 @@ impl H264Decoder for Aura {
             );
 
             self.device
-                .cmd_end_rendering(self.graphics_command_buffers[swapchain_sync_idx]);
+                .cmd_end_rendering(self.graphics_command_buffers[frames_in_flight_sync_idx]);
 
             let cmd_buf_graphics_info = [vk::CommandBufferSubmitInfo::default()
-                .command_buffer(self.graphics_command_buffers[swapchain_sync_idx])];
+                .command_buffer(self.graphics_command_buffers[frames_in_flight_sync_idx])];
             let cmd_buf_graphics_wait_infos = [vk::SemaphoreSubmitInfo::default()
-                .semaphore(self.render_complete_semaphores[swapchain_available_image_idx as usize])
+                .semaphore(
+                    self.decode_complete_semaphores[self
+                        .target_available_image_idx
+                        .expect("Can't get the target available image index.")
+                        as usize],
+                )
                 .stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)];
 
-            Aura::release_graphic_on_dst(
+            DecodingInstance::release_graphic_on_dst(
                 &self.device,
-                self.graphics_command_buffers[swapchain_sync_idx],
+                self.graphics_command_buffers[frames_in_flight_sync_idx],
                 dst_image,
                 subresource_range,
                 self._video_queue_family_index,
                 self._graphics_queue_family_index,
             );
 
-            Aura::release_swapchain_barrier(
+            DecodingInstance::release_target_barrier(
                 &self.device,
-                self.graphics_command_buffers[swapchain_sync_idx],
-                self.swapchain_images[swapchain_available_image_idx as usize],
+                self.graphics_command_buffers[frames_in_flight_sync_idx],
+                self.target_images[self
+                    .target_available_image_idx
+                    .expect("Can't get the target available image index.")
+                    as usize],
                 swapchain_subresource_range,
                 self._graphics_queue_family_index,
             );
 
             self.device
-                .end_command_buffer(self.graphics_command_buffers[swapchain_sync_idx])
+                .end_command_buffer(self.graphics_command_buffers[frames_in_flight_sync_idx])
                 .unwrap();
             let cmd_buf_graphics_complete_infos = [vk::SemaphoreSubmitInfo::default().semaphore(
-                self.graphics_complete_semaphores[swapchain_available_image_idx as usize],
+                self.graphics_complete_semaphores[self
+                    .target_available_image_idx
+                    .expect("Can't get the target available image index.")
+                    as usize],
             )];
             let graphics_submit = vk::SubmitInfo2::default()
                 .command_buffer_infos(&cmd_buf_graphics_info)
@@ -405,32 +429,39 @@ impl H264Decoder for Aura {
                 .queue_submit2(
                     self.graphics_queue,
                     &[graphics_submit],
-                    self.render_fences[swapchain_sync_idx],
+                    self.video_fences[frames_in_flight_sync_idx],
                 )
                 .unwrap();
 
             log::debug!("Frame was sent to vulkan!");
-            self.present_swapchain(swapchain_available_image_idx);
+            self.present_swapchain();
             self.current_frame_count_idx += 1;
+            Ok(())
         }
     }
 
-    fn present_swapchain(&mut self, swapchain_available_image_idx: u32) {
-        let swapchains = [self.swapchain];
-        let image_indices_available_for_present = [swapchain_available_image_idx];
-        let present_wait_semaphores =
-            [self.graphics_complete_semaphores[swapchain_available_image_idx as usize]];
+    fn present_swapchain(&mut self) {
+        if let Some(swapchain) = self.swapchain
+            && let Some(swapchain_loader) = &self.swapchain_loader
+            && let Some(target_available_image_idx) = &self.target_available_image_idx
+        {
+            let swapchains = [swapchain];
+            let image_indices_available_for_present =
+                std::slice::from_ref(target_available_image_idx);
+            let present_wait_semaphores =
+                [self.graphics_complete_semaphores[*target_available_image_idx as usize]];
 
-        let present_info = vk::PresentInfoKHR::default()
-            .wait_semaphores(&present_wait_semaphores)
-            .swapchains(&swapchains)
-            .image_indices(&image_indices_available_for_present);
+            let present_info = vk::PresentInfoKHR::default()
+                .wait_semaphores(&present_wait_semaphores)
+                .swapchains(&swapchains)
+                .image_indices(image_indices_available_for_present);
 
-        unsafe {
-            self.swapchain_loader
-                .queue_present(self.graphics_queue, &present_info)
-                .unwrap()
-        };
+            unsafe {
+                swapchain_loader
+                    .queue_present(self.graphics_queue, &present_info)
+                    .unwrap()
+            };
+        }
     }
 
     /// Make h264 session params.

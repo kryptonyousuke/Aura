@@ -50,17 +50,6 @@ impl Pipeline for Aura {
         }
     }
 
-    fn create_descriptor_pool(device: &ash::Device, count: u32) -> vk::DescriptorPool {
-        let pool_sizes = vk::DescriptorPoolSize::default()
-            .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .descriptor_count(count * 3);
-        let pool_sizes = [pool_sizes];
-        let pool_info = vk::DescriptorPoolCreateInfo::default()
-            .max_sets(count)
-            .pool_sizes(&pool_sizes);
-        unsafe { device.create_descriptor_pool(&pool_info, None).unwrap() }
-    }
-
     fn allocate_descriptor_sets(
         device: &ash::Device,
         layouts: &Vec<vk::DescriptorSetLayout>,
@@ -71,6 +60,17 @@ impl Pipeline for Aura {
             .set_layouts(layouts);
         log::debug!("Allocating descriptor set.");
         unsafe { device.allocate_descriptor_sets(&allocate_info).unwrap() }
+    }
+
+    fn create_descriptor_pool(device: &ash::Device, count: u32) -> vk::DescriptorPool {
+        let pool_sizes = vk::DescriptorPoolSize::default()
+            .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .descriptor_count(count * 3);
+        let pool_sizes = [pool_sizes];
+        let pool_info = vk::DescriptorPoolCreateInfo::default()
+            .max_sets(count)
+            .pool_sizes(&pool_sizes);
+        unsafe { device.create_descriptor_pool(&pool_info, None).unwrap() }
     }
 
     fn update_video_descriptor_set(

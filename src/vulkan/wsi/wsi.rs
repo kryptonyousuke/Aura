@@ -1,7 +1,7 @@
-use crate::video::converter::avcc_to_annexb;
 use crate::video::video_clock::VideoClock;
 use crate::video::video_context::VideoContext;
-use crate::vulkan::photon::h264::H264Decoder;
+use crate::vulkan::photon::decoders::h264::H264Decoder;
+use crate::vulkan::photon::util::converter::avcc_to_annexb;
 use crate::vulkan::vk_init::Aura;
 use ffmpeg_next as ffmpeg;
 use winit::application::ApplicationHandler;
@@ -115,20 +115,25 @@ impl ApplicationHandler for App {
                                     {
                                         std::thread::sleep(wait_duration);
                                     }
-                                    let std_sps = crate::vulkan::photon::h264_parser::parse_sps(
-                                        &v_ctx.extradata,
-                                    )
-                                    .expect("Failed to parse SPS");
-                                    let _std_pps = crate::vulkan::photon::h264_parser::parse_pps(
-                                        &v_ctx.extradata,
-                                    )
-                                    .expect("Failed to parse PPS");
-                                    aura.decode_frame(
-                                        &annexb,
-                                        &slice_offsets,
-                                        v_ctx.is_first_frame,
-                                        &std_sps,
-                                    );
+                                    let std_sps =
+                                        crate::vulkan::photon::decoders::h264_parser::parse_sps(
+                                            &v_ctx.extradata,
+                                        )
+                                        .expect("Failed to parse SPS");
+                                    let _std_pps =
+                                        crate::vulkan::photon::decoders::h264_parser::parse_pps(
+                                            &v_ctx.extradata,
+                                        )
+                                        .expect("Failed to parse PPS");
+                                    aura.photon
+                                        .decode_frame(
+                                            &annexb,
+                                            &slice_offsets,
+                                            v_ctx.is_first_frame,
+                                            &std_sps,
+                                        )
+                                        .unwrap();
+                                    aura.photon.present_swapchain();
                                     if v_ctx.is_first_frame {
                                         v_ctx.is_first_frame = false;
                                     }

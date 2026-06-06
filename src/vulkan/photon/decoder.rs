@@ -3,10 +3,10 @@
 
 use std::ffi::CStr;
 
+use super::decoders::h264::H264Decoder;
 use super::types::PhotonError;
-use crate::vulkan::photon::h264::H264Decoder;
+use crate::vulkan::photon::lib::DecodingInstance;
 use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
-use crate::vulkan::vk_init::Aura;
 use anyhow::Result;
 use ash::khr::video_queue;
 use ash::vk::{TaggedStructure, make_api_version};
@@ -85,6 +85,7 @@ pub trait Decoder {
         ycbcr_conversion: vk::SamplerYcbcrConversion,
         dpb_pool_size: usize,
         dpb_format: vk::Format,
+        dst_format: vk::Format,
         video_extent: vk::Extent2D,
     ) -> (
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
@@ -114,7 +115,7 @@ pub trait Decoder {
         video_queue_family: u32,
         graphics_queue_family: u32,
     );
-    unsafe fn acquire_swapchain_barrier(
+    unsafe fn acquire_target_barrier(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
@@ -122,7 +123,7 @@ pub trait Decoder {
         graphics_queue_family: u32,
     );
 
-    unsafe fn release_swapchain_barrier(
+    unsafe fn release_target_barrier(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
@@ -138,7 +139,7 @@ pub trait Decoder {
     );
 }
 
-impl Decoder for Aura {
+impl Decoder for DecodingInstance {
     fn create_video_session(
         instance: &Instance,
         device: &Device,
@@ -352,7 +353,7 @@ impl Decoder for Aura {
         let video_loader = video_queue::Device::load(instance, device);
         let decode_loader = VideoDecodeLoader::load(instance, device);
 
-        let session = Aura::create_video_session(
+        let session = DecodingInstance::create_video_session(
             instance,
             device,
             queue_family_index,
@@ -367,10 +368,15 @@ impl Decoder for Aura {
         .unwrap();
 
         let session_parameters = unsafe {
-            Aura::create_h264_session_parameters(device, &video_loader, extradata, session)
+            DecodingInstance::create_h264_session_parameters(
+                device,
+                &video_loader,
+                extradata,
+                session,
+            )
         };
 
-        let session_memories = Aura::allocate_video_session_memories(
+        let session_memories = DecodingInstance::allocate_video_session_memories(
             instance,
             physical_device,
             device,
@@ -394,6 +400,7 @@ impl Decoder for Aura {
         ycbcr_conversion: vk::SamplerYcbcrConversion,
         dpb_pool_size: usize,
         dpb_format: vk::Format,
+        dst_format: vk::Format,
         video_extent: vk::Extent2D,
     ) -> (
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
@@ -425,7 +432,7 @@ impl Decoder for Aura {
         let dst_image_info = vk::ImageCreateInfo::default()
             .push(&mut profile_list)
             .image_type(vk::ImageType::TYPE_2D)
-            .format(dpb_format)
+            .format(dst_format)
             .extent(dpb_dst_extent)
             .mip_levels(1)
             .array_layers(u32::try_from(dpb_pool_size).unwrap())
@@ -596,7 +603,7 @@ impl Decoder for Aura {
         unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };
     }
 
-    unsafe fn acquire_swapchain_barrier(
+    unsafe fn acquire_target_barrier(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
@@ -619,7 +626,7 @@ impl Decoder for Aura {
         unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };
     }
 
-    unsafe fn release_swapchain_barrier(
+    unsafe fn release_target_barrier(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
