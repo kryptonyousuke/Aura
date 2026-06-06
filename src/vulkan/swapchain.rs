@@ -122,4 +122,21 @@ impl Aura {
             extent,
         )
     }
+    pub fn acquire_next_image(&mut self) {
+        let next_target_img = unsafe {
+            self.swapchain_loader
+                .acquire_next_image(
+                    self.swapchain,
+                    u64::MAX,
+                    self.present_complete_semaphores
+                        [self.photon.get_frames_in_flight_sync_idx()],
+                    vk::Fence::null(),
+                )
+                .unwrap()
+                .0
+        };
+        log::debug!("Swapchain next image index: {next_target_img}");
+
+        self.photon.set_target_available_image_idx(next_target_img);
+    }
 }

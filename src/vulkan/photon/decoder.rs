@@ -408,7 +408,7 @@ impl Decoder for DecodingInstance {
         let _output_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)> =
             Vec::with_capacity(dpb_pool_size);
         let mut profile_list =
-            vk::VideoProfileListInfoKHR::default().profiles(std::slice::from_ref(&video_profile));
+            vk::VideoProfileListInfoKHR::default().profiles(std::slice::from_ref(video_profile));
         let dpb_dst_extent = vk::Extent3D {
             width: video_extent.width,
             height: video_extent.height,

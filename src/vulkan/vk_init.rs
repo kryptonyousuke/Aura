@@ -555,7 +555,7 @@ impl Aura {
             },
             vk::Offset2D { x: 0, y: 0 },
             video_extent,
-            Some(0), // needs acquire logic
+            0,
             swapchain_image_views.clone(),
             descriptor_sets.clone(),
             video_command_buffers.clone(),

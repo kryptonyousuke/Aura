@@ -125,6 +125,8 @@ impl ApplicationHandler for App {
                                             &v_ctx.extradata,
                                         )
                                         .expect("Failed to parse PPS");
+                                    aura.photon.upload_bitstream(&annexb).unwrap();
+                                    aura.acquire_next_image();
                                     aura.photon
                                         .decode_frame(
                                             &annexb,

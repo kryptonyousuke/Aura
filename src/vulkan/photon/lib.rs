@@ -20,7 +20,8 @@ pub struct DecodingInstance {
     pub(crate) current_frame_count_idx: usize,
     pub(crate) bitstream_sizes: Vec<u32>,
 
-    pub(crate) target_available_image_idx: Option<u32>,
+    pub(crate) frames_in_flight_sync_idx: usize,
+    pub(crate) target_available_image_idx: u32,
     pub(crate) bitstream_memories: Vec<vk::DeviceMemory>,
     pub(crate) target_image_views: Vec<vk::ImageView>,
     pub(crate) render_extent: vk::Extent2D,
@@ -69,7 +70,7 @@ impl DecodingInstance {
         render_extent: vk::Extent2D,
         render_offsets: vk::Offset2D,
         video_extent: vk::Extent2D,
-        target_available_image_idx: Option<u32>,
+        target_available_image_idx: u32,
         target_image_views: Vec<vk::ImageView>,
         descriptor_sets: Vec<vk::DescriptorSet>,
         video_command_buffers: Vec<vk::CommandBuffer>,
@@ -94,19 +95,19 @@ impl DecodingInstance {
         for i in 0..frames_in_flight {
             let (bitstream_buffer, bitstream_memory, bitstream_size) =
                 Self::create_bitstream_buffer(
-                    &instance,
+                    instance,
                     &video_ext,
                     physical_device,
                     &device,
-                    &video_profile,
+                    video_profile,
                 );
-            bitstream_buffers[i as usize] = bitstream_buffer;
-            bitstream_memories[i as usize] = bitstream_memory;
-            bitstream_sizes[i as usize] = bitstream_size;
+            bitstream_buffers[i] = bitstream_buffer;
+            bitstream_memories[i] = bitstream_memory;
+            bitstream_sizes[i] = bitstream_size;
         }
 
         let decoding_session = Self::setup_decoder(
-            &instance,
+            instance,
             physical_device,
             &device,
             extradata,
@@ -132,21 +133,6 @@ impl DecodingInstance {
             video_extent,
         )?;
 
-        let mut bitstream_sizes = vec![0_u32; frames_in_flight as usize];
-        for i in 0..frames_in_flight {
-            let (bitstream_buffer, bitstream_memory, bitstream_size) =
-                Self::create_bitstream_buffer(
-                    &instance,
-                    &video_ext,
-                    physical_device,
-                    &device,
-                    &video_profile,
-                );
-            bitstream_buffers[i as usize] = bitstream_buffer;
-            bitstream_memories[i as usize] = bitstream_memory;
-            bitstream_sizes[i as usize] = bitstream_size;
-        }
-
         let decoding_instance = Self {
             _graphics_queue_family_index: _graphics_queue_family_index,
             _video_queue_family_index: _video_queue_family_index,
@@ -167,8 +153,9 @@ impl DecodingInstance {
 
             video_command_buffers: video_command_buffers,
             graphics_command_buffers: graphics_command_buffers,
-            current_frame_count_idx: 0,
+            current_frame_count_idx: 0usize,
 
+            frames_in_flight_sync_idx: 0,
             target_available_image_idx: target_available_image_idx,
             target_image_views: target_image_views,
             render_extent: render_extent,
@@ -178,7 +165,7 @@ impl DecodingInstance {
             swapchain: swapchain,
             frames_in_flight: frames_in_flight,
 
-            dpb_frame_nums: vec![0u16; frames_in_flight],
+            dpb_frame_nums: vec![0u16; dpb_pool_size],
             dpb_pool: dpb_pool,
             dst_pool: dst_pool,
             dpb_pool_size: dpb_pool_size,
@@ -195,6 +182,12 @@ impl DecodingInstance {
         };
 
         Ok(decoding_instance)
+    }
+    pub fn get_frames_in_flight_sync_idx(&self) -> usize {
+        self.frames_in_flight_sync_idx
+    }
+    pub fn set_target_available_image_idx(&mut self, target_available_image_idx: u32) {
+        self.target_available_image_idx = target_available_image_idx;
     }
 }
 // Draft, won't work.
