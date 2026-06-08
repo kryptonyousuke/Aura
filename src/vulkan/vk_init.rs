@@ -549,10 +549,7 @@ impl Aura {
             viewport,
             scissor,
             usize::from(FRAMES_IN_FLIGHT),
-            vk::Extent2D {
-                width: 1920,
-                height: 1080,
-            },
+            swapchain_extent,
             vk::Offset2D { x: 0, y: 0 },
             video_extent,
             0,
@@ -572,6 +569,7 @@ impl Aura {
             video_profile_indicator,
             &mut video_profile,
             ycbcr_conversion,
+            video_sampler,
             extradata,
         );
         Self {
@@ -738,7 +736,8 @@ impl Drop for Aura {
                 self.device
                     .destroy_descriptor_set_layout(self.descriptor_set_layouts[i], None);
             }
-
+            // let () = std::mem::drop(&self.photon);\
+            
             self.device
                 .destroy_command_pool(self.graphics_command_pool, None);
             self.device

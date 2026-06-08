@@ -1,4 +1,5 @@
 use super::decoder::{self, Decoder, DecodingSession};
+use crate::vulkan::photon::sampler;
 use crate::vulkan::photon::types::VideoCodecsProfiles::UnifiedVideoProfile;
 use crate::vulkan::{photon::types::PhotonError, pipeline};
 use anyhow::Result;
@@ -14,6 +15,8 @@ pub struct DecodingInstance {
     pub(crate) video_queue: vk::Queue,
 
     pub(crate) video_session: DecodingSession,
+    pub(crate) video_sampler: vk::Sampler,
+    pub(crate) ycbcr_conversion: vk::SamplerYcbcrConversion,
     pub(crate) video_command_buffers: Vec<vk::CommandBuffer>,
     pub(crate) graphics_command_buffers: Vec<vk::CommandBuffer>,
     pub(crate) bitstream_buffers: Vec<vk::Buffer>,
@@ -87,6 +90,7 @@ impl DecodingInstance {
         video_profile_indicator: UnifiedVideoProfile,
         video_profile: &mut vk::VideoProfileInfoKHR,
         ycbcr_conversion: vk::SamplerYcbcrConversion,
+        video_sampler: vk::Sampler,
         extradata: &[u8],
     ) -> Result<Self> {
         let mut bitstream_buffers = vec![vk::Buffer::null(); frames_in_flight];
@@ -173,12 +177,13 @@ impl DecodingInstance {
             graphics_complete_semaphores: graphics_complete_semaphores.to_vec(),
             decode_complete_semaphores: decode_complete_semaphores.to_vec(),
             video_fences: video_fences.to_vec(),
-
+            ycbcr_conversion: ycbcr_conversion,
             viewport: viewport,
             scissor: scissor,
             video_extent: video_extent,
-
+            video_sampler: video_sampler,
             descriptor_sets: descriptor_sets,
+            
         };
 
         Ok(decoding_instance)
@@ -191,46 +196,51 @@ impl DecodingInstance {
     }
 }
 // Draft, won't work.
-#[cfg(feature = "raii")]
-impl<'a> Drop for DecodingInstance<'a> {
+impl Drop for DecodingInstance {
     fn drop(&mut self) {
-        for i in 0..FRAMES_IN_FLIGHT {
+        unsafe{
+            log::debug!("Trying to exit safely.");
+            for i in 0..self.frames_in_flight {
+                self.device
+                    .destroy_buffer(self.bitstream_buffers[i as usize], None);
+                self.device
+                    .free_memory(self.bitstream_memories[i as usize], None);
+            }
+            log::debug!("BLEH.");
+            
+            if self.video_session.session_parameters != vk::VideoSessionParametersKHR::null() {
+                self.video_session.video_loader
+                    .destroy_video_session_parameters(self.video_session.session_parameters, None);
+                self.video_session.session_parameters = vk::VideoSessionParametersKHR::null();
+            }
+            if self.video_session.session != vk::VideoSessionKHR::null() {
+                self.video_session.video_loader.destroy_video_session(self.video_session.session, None);
+                self.video_session.session = vk::VideoSessionKHR::null();
+            }
+            for mem in &self.video_session._session_memories {
+                self.device.free_memory(*mem, None);
+            }
+            
+            self.device.destroy_sampler(self.video_sampler, None);
+            for (_, _, view) in &self.dpb_pool {
+                self.device.destroy_image_view(*view, None);
+            }
+            for (_, _, view) in &self.dst_pool {
+                self.device.destroy_image_view(*view, None);
+            }
+            
+            if let Some((image, memory, _)) = self.dpb_pool.first() {
+                self.device.destroy_image(*image, None);
+                self.device.free_memory(*memory, None);
+            }
+            if let Some((image, memory, _)) = self.dst_pool.first() {
+                self.device.destroy_image(*image, None);
+                self.device.free_memory(*memory, None);
+            }
+            log::debug!("DPB/DST pools were freed.");
+            
             self.device
-                .destroy_buffer(self.bitstream_buffers[i as usize], None);
-            self.device
-                .free_memory(self.bitstream_memories[i as usize], None);
+                .destroy_sampler_ycbcr_conversion(self.ycbcr_conversion, None);
         }
-        if self.session_parameters != vk::VideoSessionParametersKHR::null() {
-            self.video_loader
-                .destroy_video_session_parameters(self.session_parameters, None);
-            self.session_parameters = vk::VideoSessionParametersKHR::null();
-        }
-        if self.session != vk::VideoSessionKHR::null() {
-            self.video_loader.destroy_video_session(self.session, None);
-            self.session = vk::VideoSessionKHR::null();
-        }
-        for mem in &self._session_memories {
-            self.device.free_memory(*mem, None);
-        }
-        self.device.destroy_sampler(self.video_sampler, None);
-        for (_, _, view) in &self.dpb_pool {
-            self.device.destroy_image_view(*view, None);
-        }
-        for (_, _, view) in &self.dst_pool {
-            self.device.destroy_image_view(*view, None);
-        }
-
-        if let Some((image, memory, _)) = self.dpb_pool.first() {
-            self.device.destroy_image(*image, None);
-            self.device.free_memory(*memory, None);
-        }
-        if let Some((image, memory, _)) = self.dst_pool.first() {
-            self.device.destroy_image(*image, None);
-            self.device.free_memory(*memory, None);
-        }
-        log::debug!("DPB/DST pools were freed.");
-
-        self.device
-            .destroy_sampler_ycbcr_conversion(self.ycbcr_conversion, None);
     }
 }
