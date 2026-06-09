@@ -712,14 +712,21 @@ impl Drop for Aura {
                     .free_memory(self.photon.bitstream_memories[i as usize], None);
             }
 
-            if self.photon.video_session.session_parameters != vk::VideoSessionParametersKHR::null() {
-                self.photon.video_session
+            if self.photon.video_session.session_parameters != vk::VideoSessionParametersKHR::null()
+            {
+                self.photon
+                    .video_session
                     .video_loader
-                    .destroy_video_session_parameters(self.photon.video_session.session_parameters, None);
-                self.photon.video_session.session_parameters = vk::VideoSessionParametersKHR::null();
+                    .destroy_video_session_parameters(
+                        self.photon.video_session.session_parameters,
+                        None,
+                    );
+                self.photon.video_session.session_parameters =
+                    vk::VideoSessionParametersKHR::null();
             }
             if self.photon.video_session.session != vk::VideoSessionKHR::null() {
-                self.photon.video_session
+                self.photon
+                    .video_session
                     .video_loader
                     .destroy_video_session(self.photon.video_session.session, None);
                 self.photon.video_session.session = vk::VideoSessionKHR::null();
@@ -752,7 +759,7 @@ impl Drop for Aura {
             self.swapchain_loader
                 .destroy_swapchain(self.swapchain, None);
             log::debug!("SwapchainKHR was succcessfully destroyed.");
-            
+
             log::debug!("Video decoding resources were successfully freed and destroyed.");
 
             for i in 0..self.frames_in_flight {
