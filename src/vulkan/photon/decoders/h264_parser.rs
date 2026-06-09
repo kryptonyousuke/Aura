@@ -402,7 +402,7 @@ pub fn parse_pps(extradata: &[u8]) -> Option<vk::native::StdVideoH264PicturePara
         transform_8x8_mode_flag = reader.read_bit()?;
         pic_scaling_matrix_present_flag = reader.read_bit()?;
 
-        if !(pic_scaling_matrix_present_flag == 1) {
+        if pic_scaling_matrix_present_flag != 1 {
             second_chroma_qp_index_offset = reader.read_se().unwrap_or(chroma_qp_index_offset);
         }
     }

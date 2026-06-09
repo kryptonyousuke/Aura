@@ -1,5 +1,6 @@
 use super::debug;
 use crate::video::video_context::VideoContext;
+use crate::vulkan::photon;
 use crate::vulkan::photon::decoder::{Decoder, DecodingSession};
 use crate::vulkan::photon::sampler::Sampler;
 use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
@@ -28,37 +29,18 @@ pub struct Aura {
     pub _debug_messenger: DebugUtilsMessengerEXT,
     pub _video_queue_family_index: u32,
     pub _graphics_queue_family_index: u32,
-    pub _session_memories: Vec<vk::DeviceMemory>,
 
     pub physical_device: vk::PhysicalDevice,
     pub device: ash::Device,
-
-    pub session: vk::VideoSessionKHR,
-    pub video_instance_ext: ash::khr::video_queue::Instance,
-    pub bitstream_buffers: [vk::Buffer; FRAMES_IN_FLIGHT as usize],
-    pub bitstream_memories: [vk::DeviceMemory; FRAMES_IN_FLIGHT as usize],
-    pub bitstream_sizes: [u32; FRAMES_IN_FLIGHT as usize],
-    pub video_device: video_queue::Device,
-    pub decode_loader: VideoDecodeLoader,
 
     pub graphics_queue: vk::Queue,
     pub video_queue: vk::Queue,
     pub surface: vk::SurfaceKHR,
     pub surface_loader: ash::khr::surface::Instance,
-    pub video_color_range: vk::SamplerYcbcrRange,
-    pub session_parameters: vk::VideoSessionParametersKHR,
 
-    /*
-     * My VCN 2.0 doesn't support a single pool for dst and dpb at the same time.
-     * This should be changed in the future.
-     */
-    pub dpb_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>, // Decoded Pictures Buffer used as reference to decode P-frames and B-frames.
-    pub dst_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>, // Stores the current decoded image.
-    pub dpb_and_dst_format: vk::Format,
     pub dpb_pocs: Vec<i32>,
     pub dpb_pool_size: usize,
     pub dpb_slot_valid: Vec<bool>,
-    pub dpb_frame_nums: [u16; DPB_POOL_SIZE],
     pub current_frame_count_idx: usize,
     pub graphics_command_pool: vk::CommandPool,
     pub graphics_command_buffers: Vec<vk::CommandBuffer>,
@@ -82,14 +64,13 @@ pub struct Aura {
     pub descriptor_set_layouts: Vec<vk::DescriptorSetLayout>,
     pub descriptor_pool: vk::DescriptorPool,
     pub descriptor_sets: Vec<vk::DescriptorSet>,
-    pub ycbcr_conversion: vk::SamplerYcbcrConversion,
-    video_sampler: vk::Sampler,
 
     pub viewport: vk::Viewport,
     pub scissor: vk::Rect2D,
     pub video_extent: vk::Extent2D,
     pub frames_in_flight: u8,
     pub supported_decoders: SupportedCodecs,
+    pub photon: super::photon::lib::DecodingInstance,
 }
 
 impl Aura {
@@ -430,42 +411,6 @@ impl Aura {
             "VIDEO_DECODE_DST_KHR",
         );
 
-        let DecodingSession {
-            session,
-            _session_memories,
-            video_device,
-            decode_loader,
-            session_parameters,
-        } = Self::setup_decoder(
-            &instance,
-            physical_device,
-            &device,
-            extradata,
-            decode_queue_family_index,
-            video_codec,
-            Some(video_profile_indicator),
-            vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
-            vk::VideoComponentBitDepthFlagsKHR::TYPE_8,
-            vk::VideoChromaSubsamplingFlagsKHR::TYPE_420,
-            dpb_and_dst_format,
-            dpb_and_dst_format,
-        );
-        let mut bitstream_buffers = [vk::Buffer::null(); FRAMES_IN_FLIGHT as usize];
-        let mut bitstream_memories = [vk::DeviceMemory::null(); FRAMES_IN_FLIGHT as usize];
-        let mut bitstream_sizes = [0_u32; FRAMES_IN_FLIGHT as usize];
-        for i in 0..FRAMES_IN_FLIGHT {
-            let (bitstream_buffer, bitstream_memory, bitstream_size) =
-                Aura::create_bitstream_buffer(
-                    &instance,
-                    &video_instance_ext,
-                    physical_device,
-                    &device,
-                    &video_profile,
-                );
-            bitstream_buffers[i as usize] = bitstream_buffer;
-            bitstream_memories[i as usize] = bitstream_memory;
-            bitstream_sizes[i as usize] = bitstream_size;
-        }
         let (
             swapchain_loader,
             swapchain,
@@ -520,16 +465,6 @@ impl Aura {
         let video_command_buffers =
             unsafe { device.allocate_command_buffers(&video_alloc_info).unwrap() };
 
-        let (dpb_pool, dst_pool) = Self::create_dpb_dst_pool(
-            &instance,
-            physical_device,
-            &device,
-            &mut video_profile,
-            ycbcr_conversion,
-            DPB_POOL_SIZE,
-            dpb_and_dst_format,
-            video_extent,
-        );
         let semaphore_create_info = vk::SemaphoreCreateInfo::default();
         let frames_in_flight_fences_info =
             vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
@@ -598,34 +533,62 @@ impl Aura {
             extent: swapchain_extent,
         };
         log::debug!("Descriptor sets size: {}", descriptor_sets.len());
+        let photon = photon::lib::DecodingInstance::new(
+            decode_queue_family_index,
+            graphics_queue_family_index,
+            &instance,
+            physical_device,
+            device.clone(),
+            video_instance_ext.clone(),
+            Some(swapchain_loader.clone()),
+            graphics_queue,
+            video_queue,
+            pipeline,
+            pipeline_layout,
+            &present_complete_semaphores,
+            viewport,
+            scissor,
+            usize::from(FRAMES_IN_FLIGHT),
+            swapchain_extent,
+            vk::Offset2D { x: 0, y: 0 },
+            video_extent,
+            0,
+            swapchain_image_views.clone(),
+            descriptor_sets.clone(),
+            video_command_buffers.clone(),
+            graphics_command_buffers.clone(),
+            swapchain_images.clone(),
+            DPB_POOL_SIZE,
+            &graphics_complete_semaphores,
+            &render_complete_semaphores,
+            &frames_in_flight_fences,
+            Some(swapchain),
+            dpb_and_dst_format,
+            dpb_and_dst_format,
+            video_codec,
+            video_profile_indicator,
+            &mut video_profile,
+            ycbcr_conversion,
+            video_sampler,
+            extradata,
+        );
         Self {
             _entry: entry,
             _instance: instance,
             _video_queue_family_index: decode_queue_family_index,
             _graphics_queue_family_index: graphics_queue_family_index,
-            _session_memories: _session_memories,
             _debug_utils_loader: _debug_utils_loader,
             _debug_messenger: _debug_messenger,
 
             device: device,
             surface: surface,
             surface_loader: surface_loader,
-            video_instance_ext: video_instance_ext,
             physical_device: physical_device,
 
             video_command_pool: video_command_pool,
-            session: session,
-            bitstream_buffers: bitstream_buffers,
-            bitstream_memories: bitstream_memories,
-            bitstream_sizes: bitstream_sizes,
-            video_device: video_device,
-            decode_loader: decode_loader,
-            ycbcr_conversion: ycbcr_conversion,
             video_command_buffers: video_command_buffers,
             graphics_queue: graphics_queue,
             video_queue: video_queue,
-            session_parameters: session_parameters,
-            video_color_range: video_color_range,
 
             graphics_command_pool: graphics_command_pool,
             graphics_command_buffers: graphics_command_buffers,
@@ -643,15 +606,9 @@ impl Aura {
 
             pipeline_layout: pipeline_layout,
             pipeline: pipeline,
-            video_sampler: video_sampler,
             descriptor_set_layouts: descriptor_set_layouts,
-
-            dpb_pool: dpb_pool,
-            dst_pool: dst_pool,
-            dpb_and_dst_format: dpb_and_dst_format,
             current_frame_count_idx: 0,
             dpb_pool_size: DPB_POOL_SIZE,
-            dpb_frame_nums: [0_u16; DPB_POOL_SIZE],
             dpb_slot_valid: vec![false; DPB_POOL_SIZE],
             dpb_pocs: vec![0; DPB_POOL_SIZE],
             descriptor_pool: descriptor_pool,
@@ -662,6 +619,7 @@ impl Aura {
             video_extent: video_extent,
             frames_in_flight: FRAMES_IN_FLIGHT,
             supported_decoders: supported_decoders,
+            photon: photon.unwrap(),
         }
     }
 
@@ -747,31 +705,61 @@ impl Drop for Aura {
             }
             log::debug!("Swapchain's Image Views were successfully destroyed.");
 
-            if self.swapchain != vk::SwapchainKHR::null() {
-                self.swapchain_loader
-                    .destroy_swapchain(self.swapchain, None);
-                self.swapchain = vk::SwapchainKHR::null();
-                log::debug!("SwapchainKHR was succcessfully destroyed.");
+            for i in 0..self.frames_in_flight {
+                self.device
+                    .destroy_buffer(self.photon.bitstream_buffers[i as usize], None);
+                self.device
+                    .free_memory(self.photon.bitstream_memories[i as usize], None);
             }
 
-            if self.session_parameters != vk::VideoSessionParametersKHR::null() {
-                self.video_device
-                    .destroy_video_session_parameters(self.session_parameters, None);
-                self.session_parameters = vk::VideoSessionParametersKHR::null();
+            if self.photon.video_session.session_parameters != vk::VideoSessionParametersKHR::null()
+            {
+                self.photon
+                    .video_session
+                    .video_device
+                    .destroy_video_session_parameters(
+                        self.photon.video_session.session_parameters,
+                        None,
+                    );
+                self.photon.video_session.session_parameters =
+                    vk::VideoSessionParametersKHR::null();
             }
-            if self.session != vk::VideoSessionKHR::null() {
-                self.video_device.destroy_video_session(self.session, None);
-                self.session = vk::VideoSessionKHR::null();
+            if self.photon.video_session.session != vk::VideoSessionKHR::null() {
+                self.photon
+                    .video_session
+                    .video_device
+                    .destroy_video_session(self.photon.video_session.session, None);
+                self.photon.video_session.session = vk::VideoSessionKHR::null();
             }
-            for mem in &self._session_memories {
+            for mem in &self.photon.video_session._session_memories {
                 self.device.free_memory(*mem, None);
             }
-            for i in 0..FRAMES_IN_FLIGHT {
-                self.device
-                    .destroy_buffer(self.bitstream_buffers[i as usize], None);
-                self.device
-                    .free_memory(self.bitstream_memories[i as usize], None);
+
+            self.device.destroy_sampler(self.photon.video_sampler, None);
+            for (_, _, view) in &self.photon.dpb_pool {
+                self.device.destroy_image_view(*view, None);
             }
+            for (_, _, view) in &self.photon.dst_pool {
+                self.device.destroy_image_view(*view, None);
+            }
+
+            if let Some((image, memory, _)) = self.photon.dpb_pool.first() {
+                self.device.destroy_image(*image, None);
+                self.device.free_memory(*memory, None);
+            }
+            if let Some((image, memory, _)) = self.photon.dst_pool.first() {
+                self.device.destroy_image(*image, None);
+                self.device.free_memory(*memory, None);
+            }
+            log::debug!("DPB/DST pools were freed.");
+
+            self.device
+                .destroy_sampler_ycbcr_conversion(self.photon.ycbcr_conversion, None);
+
+            self.swapchain_loader
+                .destroy_swapchain(self.swapchain, None);
+            log::debug!("SwapchainKHR was succcessfully destroyed.");
+
             log::debug!("Video decoding resources were successfully freed and destroyed.");
 
             for i in 0..self.frames_in_flight {
@@ -796,7 +784,6 @@ impl Drop for Aura {
                 self.device
                     .destroy_descriptor_set_layout(self.descriptor_set_layouts[i], None);
             }
-            self.device.destroy_sampler(self.video_sampler, None);
 
             self.device
                 .destroy_command_pool(self.graphics_command_pool, None);
@@ -804,25 +791,6 @@ impl Drop for Aura {
                 .destroy_command_pool(self.video_command_pool, None);
             log::debug!("Successfully destroyed all command pools.");
 
-            for (_, _, view) in &self.dpb_pool {
-                self.device.destroy_image_view(*view, None);
-            }
-            for (_, _, view) in &self.dst_pool {
-                self.device.destroy_image_view(*view, None);
-            }
-
-            if let Some((image, memory, _)) = self.dpb_pool.first() {
-                self.device.destroy_image(*image, None);
-                self.device.free_memory(*memory, None);
-            }
-            if let Some((image, memory, _)) = self.dst_pool.first() {
-                self.device.destroy_image(*image, None);
-                self.device.free_memory(*memory, None);
-            }
-            log::debug!("DPB/DST pools were freed.");
-
-            self.device
-                .destroy_sampler_ycbcr_conversion(self.ycbcr_conversion, None);
             self.device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
             self.device.destroy_device(None);

@@ -1,5 +1,6 @@
 pub mod decoder;
-pub mod h264;
-pub mod h264_parser;
+pub mod decoders;
+pub mod lib;
 pub mod sampler;
 pub mod types;
+pub mod util;

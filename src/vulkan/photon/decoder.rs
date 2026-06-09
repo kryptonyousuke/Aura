@@ -3,10 +3,10 @@
 
 use std::ffi::CStr;
 
+use super::decoders::h264::H264Decoder;
 use super::types::PhotonError;
-use crate::vulkan::photon::h264::H264Decoder;
+use crate::vulkan::photon::lib::DecodingInstance;
 use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
-use crate::vulkan::vk_init::Aura;
 use anyhow::Result;
 use ash::khr::video_queue;
 use ash::vk::{TaggedStructure, make_api_version};
@@ -76,7 +76,7 @@ pub trait Decoder {
         chroma_subsampling: vk::VideoChromaSubsamplingFlagsKHR,
         picture_format: vk::Format,
         reference_picture_format: vk::Format,
-    ) -> DecodingSession;
+    ) -> Result<DecodingSession>;
     fn create_dpb_dst_pool(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
@@ -85,11 +85,12 @@ pub trait Decoder {
         ycbcr_conversion: vk::SamplerYcbcrConversion,
         dpb_pool_size: usize,
         dpb_format: vk::Format,
+        dst_format: vk::Format,
         video_extent: vk::Extent2D,
-    ) -> (
+    ) -> Result<(
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
-    );
+    )>;
     unsafe fn acquire_image_dst_on_graphic(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
@@ -114,7 +115,7 @@ pub trait Decoder {
         video_queue_family: u32,
         graphics_queue_family: u32,
     );
-    unsafe fn acquire_swapchain_barrier(
+    unsafe fn acquire_target_barrier(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
@@ -122,7 +123,7 @@ pub trait Decoder {
         graphics_queue_family: u32,
     );
 
-    unsafe fn release_swapchain_barrier(
+    unsafe fn release_target_barrier(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
@@ -138,7 +139,7 @@ pub trait Decoder {
     );
 }
 
-impl Decoder for Aura {
+impl Decoder for DecodingInstance {
     fn create_video_session(
         instance: &Instance,
         device: &Device,
@@ -348,11 +349,11 @@ impl Decoder for Aura {
         chroma_subsampling: vk::VideoChromaSubsamplingFlagsKHR,
         picture_format: vk::Format,
         reference_picture_format: vk::Format,
-    ) -> DecodingSession {
+    ) -> Result<DecodingSession> {
         let video_device = video_queue::Device::load(instance, device);
         let decode_loader = VideoDecodeLoader::load(instance, device);
 
-        let session = Aura::create_video_session(
+        let session = DecodingInstance::create_video_session(
             instance,
             device,
             queue_family_index,
@@ -363,14 +364,18 @@ impl Decoder for Aura {
             luma_depth,
             chroma_depth,
             reference_picture_format,
-        )
-        .unwrap();
+        )?;
 
         let session_parameters = unsafe {
-            Aura::create_h264_session_parameters(device, &video_device, extradata, session)
+            DecodingInstance::create_h264_session_parameters(
+                device,
+                &video_device,
+                extradata,
+                session,
+            )
         };
 
-        let session_memories = Aura::allocate_video_session_memories(
+        let session_memories = DecodingInstance::allocate_video_session_memories(
             instance,
             physical_device,
             device,
@@ -378,13 +383,13 @@ impl Decoder for Aura {
             session,
         );
 
-        DecodingSession {
+        Ok(DecodingSession {
             session: session,
             _session_memories: session_memories,
             video_device: video_device,
             decode_loader: decode_loader,
             session_parameters: session_parameters,
-        }
+        })
     }
     fn create_dpb_dst_pool(
         instance: &Instance,
@@ -394,15 +399,16 @@ impl Decoder for Aura {
         ycbcr_conversion: vk::SamplerYcbcrConversion,
         dpb_pool_size: usize,
         dpb_format: vk::Format,
+        dst_format: vk::Format,
         video_extent: vk::Extent2D,
-    ) -> (
+    ) -> Result<(
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
         Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>,
-    ) {
+    )> {
         let _output_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)> =
             Vec::with_capacity(dpb_pool_size);
         let mut profile_list =
-            vk::VideoProfileListInfoKHR::default().profiles(std::slice::from_ref(&video_profile));
+            vk::VideoProfileListInfoKHR::default().profiles(std::slice::from_ref(video_profile));
         let dpb_dst_extent = vk::Extent3D {
             width: video_extent.width,
             height: video_extent.height,
@@ -420,21 +426,21 @@ impl Decoder for Aura {
             .usage(vk::ImageUsageFlags::VIDEO_DECODE_DPB_KHR)
             .initial_layout(vk::ImageLayout::UNDEFINED);
 
-        let dpb_image = unsafe { device.create_image(&dpb_image_info, None).unwrap() };
+        let dpb_image = unsafe { device.create_image(&dpb_image_info, None)? };
 
         let dst_image_info = vk::ImageCreateInfo::default()
             .push(&mut profile_list)
             .image_type(vk::ImageType::TYPE_2D)
-            .format(dpb_format)
+            .format(dst_format)
             .extent(dpb_dst_extent)
             .mip_levels(1)
-            .array_layers(u32::try_from(dpb_pool_size).unwrap())
+            .array_layers(u32::try_from(dpb_pool_size)?)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
             .usage(vk::ImageUsageFlags::VIDEO_DECODE_DST_KHR | vk::ImageUsageFlags::SAMPLED)
             .initial_layout(vk::ImageLayout::UNDEFINED);
 
-        let dst_image = unsafe { device.create_image(&dst_image_info, None).unwrap() };
+        let dst_image = unsafe { device.create_image(&dst_image_info, None)? };
 
         let dpb_mem_requirements = unsafe { device.get_image_memory_requirements(dpb_image) };
         let dst_mem_requirements = unsafe { device.get_image_memory_requirements(dst_image) };
@@ -460,16 +466,16 @@ impl Decoder for Aura {
         let dpb_alloc_info = vk::MemoryAllocateInfo::default()
             .allocation_size(dpb_mem_requirements.size)
             .memory_type_index(dpb_memory_type_index);
-        let dpb_memory = unsafe { device.allocate_memory(&dpb_alloc_info, None).unwrap() };
+        let dpb_memory = unsafe { device.allocate_memory(&dpb_alloc_info, None)? };
 
         let dst_alloc_info = vk::MemoryAllocateInfo::default()
             .allocation_size(dst_mem_requirements.size)
             .memory_type_index(dst_memory_type_index);
-        let dst_memory = unsafe { device.allocate_memory(&dst_alloc_info, None).unwrap() };
+        let dst_memory = unsafe { device.allocate_memory(&dst_alloc_info, None)? };
 
         unsafe {
-            device.bind_image_memory(dpb_image, dpb_memory, 0).unwrap();
-            device.bind_image_memory(dst_image, dst_memory, 0).unwrap();
+            device.bind_image_memory(dpb_image, dpb_memory, 0)?;
+            device.bind_image_memory(dst_image, dst_memory, 0)?;
         }
 
         let mut dst_pool = Vec::with_capacity(dpb_pool_size);
@@ -487,7 +493,7 @@ impl Decoder for Aura {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
                     level_count: 1,
-                    base_array_layer: u32::try_from(i).unwrap(),
+                    base_array_layer: u32::try_from(i)?,
                     layer_count: 1,
                 });
             let mut local_ycbcr_info =
@@ -502,12 +508,12 @@ impl Decoder for Aura {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
                     level_count: 1,
-                    base_array_layer: u32::try_from(i).unwrap(),
+                    base_array_layer: u32::try_from(i)?,
                     layer_count: 1,
                 });
 
-            let dpb_image_view = unsafe { device.create_image_view(&dpb_view_info, None).unwrap() };
-            let dst_image_view = unsafe { device.create_image_view(&dst_view_info, None).unwrap() };
+            let dpb_image_view = unsafe { device.create_image_view(&dpb_view_info, None)? };
+            let dst_image_view = unsafe { device.create_image_view(&dst_view_info, None)? };
 
             let dpb_mem_handle = if i == 0 {
                 dpb_memory
@@ -523,7 +529,7 @@ impl Decoder for Aura {
             dpb_pool.push((dpb_image, dpb_mem_handle, dpb_image_view));
             dst_pool.push((dst_image, dst_mem_handle, dst_image_view));
         }
-        (dpb_pool, dst_pool)
+        Ok((dpb_pool, dst_pool))
     }
 
     unsafe fn acquire_image_dst_on_graphic(
@@ -596,7 +602,7 @@ impl Decoder for Aura {
         unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };
     }
 
-    unsafe fn acquire_swapchain_barrier(
+    unsafe fn acquire_target_barrier(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
@@ -619,7 +625,7 @@ impl Decoder for Aura {
         unsafe { device.cmd_pipeline_barrier2(cmd_buf_graphics, &dependency) };
     }
 
-    unsafe fn release_swapchain_barrier(
+    unsafe fn release_target_barrier(
         device: &ash::Device,
         cmd_buf_graphics: vk::CommandBuffer,
         dst_image: vk::Image,
