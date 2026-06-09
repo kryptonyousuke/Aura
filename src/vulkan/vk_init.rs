@@ -705,13 +705,54 @@ impl Drop for Aura {
             }
             log::debug!("Swapchain's Image Views were successfully destroyed.");
 
-            if self.swapchain != vk::SwapchainKHR::null() {
-                self.swapchain_loader
-                    .destroy_swapchain(self.swapchain, None);
-                self.swapchain = vk::SwapchainKHR::null();
-                log::debug!("SwapchainKHR was succcessfully destroyed.");
+            for i in 0..self.frames_in_flight {
+                self.device
+                    .destroy_buffer(self.photon.bitstream_buffers[i as usize], None);
+                self.device
+                    .free_memory(self.photon.bitstream_memories[i as usize], None);
             }
 
+            if self.photon.video_session.session_parameters != vk::VideoSessionParametersKHR::null() {
+                self.photon.video_session
+                    .video_loader
+                    .destroy_video_session_parameters(self.photon.video_session.session_parameters, None);
+                self.photon.video_session.session_parameters = vk::VideoSessionParametersKHR::null();
+            }
+            if self.photon.video_session.session != vk::VideoSessionKHR::null() {
+                self.photon.video_session
+                    .video_loader
+                    .destroy_video_session(self.photon.video_session.session, None);
+                self.photon.video_session.session = vk::VideoSessionKHR::null();
+            }
+            for mem in &self.photon.video_session._session_memories {
+                self.device.free_memory(*mem, None);
+            }
+
+            self.device.destroy_sampler(self.photon.video_sampler, None);
+            for (_, _, view) in &self.photon.dpb_pool {
+                self.device.destroy_image_view(*view, None);
+            }
+            for (_, _, view) in &self.photon.dst_pool {
+                self.device.destroy_image_view(*view, None);
+            }
+
+            if let Some((image, memory, _)) = self.photon.dpb_pool.first() {
+                self.device.destroy_image(*image, None);
+                self.device.free_memory(*memory, None);
+            }
+            if let Some((image, memory, _)) = self.photon.dst_pool.first() {
+                self.device.destroy_image(*image, None);
+                self.device.free_memory(*memory, None);
+            }
+            log::debug!("DPB/DST pools were freed.");
+
+            self.device
+                .destroy_sampler_ycbcr_conversion(self.photon.ycbcr_conversion, None);
+
+            self.swapchain_loader
+                .destroy_swapchain(self.swapchain, None);
+            log::debug!("SwapchainKHR was succcessfully destroyed.");
+            
             log::debug!("Video decoding resources were successfully freed and destroyed.");
 
             for i in 0..self.frames_in_flight {
@@ -736,8 +777,7 @@ impl Drop for Aura {
                 self.device
                     .destroy_descriptor_set_layout(self.descriptor_set_layouts[i], None);
             }
-            // let () = std::mem::drop(&self.photon);\
-            
+
             self.device
                 .destroy_command_pool(self.graphics_command_pool, None);
             self.device

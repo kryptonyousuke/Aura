@@ -128,8 +128,7 @@ impl Aura {
                 .acquire_next_image(
                     self.swapchain,
                     u64::MAX,
-                    self.present_complete_semaphores
-                        [self.photon.get_frames_in_flight_sync_idx()],
+                    self.present_complete_semaphores[self.photon.get_frames_in_flight_sync_idx()],
                     vk::Fence::null(),
                 )
                 .unwrap()

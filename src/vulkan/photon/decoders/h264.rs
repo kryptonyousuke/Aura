@@ -43,9 +43,12 @@ impl H264Decoder for DecodingInstance {
         log::debug!("dpb_pool_size: {}", self.dpb_pool_size);
         log::debug!("current_slot_idx: {current_slot_idx}");
         log::debug!("frames_in_flight: {}", self.frames_in_flight);
-        log::debug!("target_available_image_idx: {}", self.target_available_image_idx);
+        log::debug!(
+            "target_available_image_idx: {}",
+            self.target_available_image_idx
+        );
         let aligned_size = self.bitstream_sizes[self.frames_in_flight_sync_idx];
-        unsafe {            
+        unsafe {
             let color_attachment_info = vk::RenderingAttachmentInfoKHR::default()
                 .image_view(self.target_image_views[self.target_available_image_idx as usize])
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -280,7 +283,7 @@ impl H264Decoder for DecodingInstance {
             self.device
                 .queue_submit2(self.video_queue, &[submit_info], vk::Fence::null())?;
             // ---------------------- End of the decodification.------------------------ //
-            
+
             self.device.begin_command_buffer(
                 self.graphics_command_buffers[self.frames_in_flight_sync_idx],
                 &vk::CommandBufferBeginInfo::default(),
@@ -370,8 +373,9 @@ impl H264Decoder for DecodingInstance {
                 self._graphics_queue_family_index,
             );
 
-            self.device
-                .end_command_buffer(self.graphics_command_buffers[self.frames_in_flight_sync_idx])?;
+            self.device.end_command_buffer(
+                self.graphics_command_buffers[self.frames_in_flight_sync_idx],
+            )?;
             let cmd_buf_graphics_info = [vk::CommandBufferSubmitInfo::default()
                 .command_buffer(self.graphics_command_buffers[self.frames_in_flight_sync_idx])];
             let cmd_buf_graphics_wait_infos = [vk::SemaphoreSubmitInfo::default()
@@ -398,9 +402,8 @@ impl H264Decoder for DecodingInstance {
             Ok(())
         }
     }
-    fn upload_bitstream(&mut self, bitstream_data: &[u8]) -> Result<()>{
-        self.frames_in_flight_sync_idx =
-            self.current_frame_count_idx % self.frames_in_flight;
+    fn upload_bitstream(&mut self, bitstream_data: &[u8]) -> Result<()> {
+        self.frames_in_flight_sync_idx = self.current_frame_count_idx % self.frames_in_flight;
         unsafe {
             self.upload_bitstream_packet(bitstream_data, self.frames_in_flight_sync_idx);
             let () = self.device.wait_for_fences(

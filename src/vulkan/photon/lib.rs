@@ -183,7 +183,6 @@ impl DecodingInstance {
             video_extent: video_extent,
             video_sampler: video_sampler,
             descriptor_sets: descriptor_sets,
-            
         };
 
         Ok(decoding_instance)
@@ -196,51 +195,53 @@ impl DecodingInstance {
     }
 }
 // Draft, won't work.
-impl Drop for DecodingInstance {
-    fn drop(&mut self) {
-        unsafe{
-            log::debug!("Trying to exit safely.");
-            for i in 0..self.frames_in_flight {
-                self.device
-                    .destroy_buffer(self.bitstream_buffers[i as usize], None);
-                self.device
-                    .free_memory(self.bitstream_memories[i as usize], None);
-            }
-            log::debug!("BLEH.");
-            
-            if self.video_session.session_parameters != vk::VideoSessionParametersKHR::null() {
-                self.video_session.video_loader
-                    .destroy_video_session_parameters(self.video_session.session_parameters, None);
-                self.video_session.session_parameters = vk::VideoSessionParametersKHR::null();
-            }
-            if self.video_session.session != vk::VideoSessionKHR::null() {
-                self.video_session.video_loader.destroy_video_session(self.video_session.session, None);
-                self.video_session.session = vk::VideoSessionKHR::null();
-            }
-            for mem in &self.video_session._session_memories {
-                self.device.free_memory(*mem, None);
-            }
-            
-            self.device.destroy_sampler(self.video_sampler, None);
-            for (_, _, view) in &self.dpb_pool {
-                self.device.destroy_image_view(*view, None);
-            }
-            for (_, _, view) in &self.dst_pool {
-                self.device.destroy_image_view(*view, None);
-            }
-            
-            if let Some((image, memory, _)) = self.dpb_pool.first() {
-                self.device.destroy_image(*image, None);
-                self.device.free_memory(*memory, None);
-            }
-            if let Some((image, memory, _)) = self.dst_pool.first() {
-                self.device.destroy_image(*image, None);
-                self.device.free_memory(*memory, None);
-            }
-            log::debug!("DPB/DST pools were freed.");
-            
-            self.device
-                .destroy_sampler_ycbcr_conversion(self.ycbcr_conversion, None);
-        }
-    }
-}
+// impl Drop for DecodingInstance {
+//     fn drop(&mut self) {
+//         unsafe {
+//             log::debug!("Trying to exit safely.");
+//             for i in 0..self.frames_in_flight {
+//                 self.device
+//                     .destroy_buffer(self.bitstream_buffers[i as usize], None);
+//                 self.device
+//                     .free_memory(self.bitstream_memories[i as usize], None);
+//             }
+
+//             if self.video_session.session_parameters != vk::VideoSessionParametersKHR::null() {
+//                 self.video_session
+//                     .video_loader
+//                     .destroy_video_session_parameters(self.video_session.session_parameters, None);
+//                 self.video_session.session_parameters = vk::VideoSessionParametersKHR::null();
+//             }
+//             if self.video_session.session != vk::VideoSessionKHR::null() {
+//                 self.video_session
+//                     .video_loader
+//                     .destroy_video_session(self.video_session.session, None);
+//                 self.video_session.session = vk::VideoSessionKHR::null();
+//             }
+//             for mem in &self.video_session._session_memories {
+//                 self.device.free_memory(*mem, None);
+//             }
+
+//             self.device.destroy_sampler(self.video_sampler, None);
+//             for (_, _, view) in &self.dpb_pool {
+//                 self.device.destroy_image_view(*view, None);
+//             }
+//             for (_, _, view) in &self.dst_pool {
+//                 self.device.destroy_image_view(*view, None);
+//             }
+
+//             if let Some((image, memory, _)) = self.dpb_pool.first() {
+//                 self.device.destroy_image(*image, None);
+//                 self.device.free_memory(*memory, None);
+//             }
+//             if let Some((image, memory, _)) = self.dst_pool.first() {
+//                 self.device.destroy_image(*image, None);
+//                 self.device.free_memory(*memory, None);
+//             }
+//             log::debug!("DPB/DST pools were freed.");
+
+//             self.device
+//                 .destroy_sampler_ycbcr_conversion(self.ycbcr_conversion, None);
+//         }
+//     }
+// }
