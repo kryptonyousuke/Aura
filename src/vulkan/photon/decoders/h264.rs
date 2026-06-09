@@ -215,7 +215,7 @@ impl H264Decoder for DecodingInstance {
                 .video_session_parameters(self.video_session.session_parameters)
                 .reference_slots(&coding_reference_slots);
 
-            self.video_session.video_loader.cmd_begin_video_coding(
+            self.video_session.video_device.cmd_begin_video_coding(
                 self.video_command_buffers[self.frames_in_flight_sync_idx],
                 &begin_coding_info,
             );
@@ -223,7 +223,7 @@ impl H264Decoder for DecodingInstance {
             if is_first_frame {
                 let control_info = vk::VideoCodingControlInfoKHR::default()
                     .flags(vk::VideoCodingControlFlagsKHR::RESET);
-                self.video_session.video_loader.cmd_control_video_coding(
+                self.video_session.video_device.cmd_control_video_coding(
                     self.video_command_buffers[self.frames_in_flight_sync_idx],
                     &control_info,
                 );
@@ -250,7 +250,7 @@ impl H264Decoder for DecodingInstance {
             );
 
             // End coding session and submit execution
-            self.video_session.video_loader.cmd_end_video_coding(
+            self.video_session.video_device.cmd_end_video_coding(
                 self.video_command_buffers[self.frames_in_flight_sync_idx],
                 &vk::VideoEndCodingInfoKHR::default(),
             );

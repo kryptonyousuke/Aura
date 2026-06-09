@@ -716,7 +716,7 @@ impl Drop for Aura {
             {
                 self.photon
                     .video_session
-                    .video_loader
+                    .video_device
                     .destroy_video_session_parameters(
                         self.photon.video_session.session_parameters,
                         None,
@@ -727,7 +727,7 @@ impl Drop for Aura {
             if self.photon.video_session.session != vk::VideoSessionKHR::null() {
                 self.photon
                     .video_session
-                    .video_loader
+                    .video_device
                     .destroy_video_session(self.photon.video_session.session, None);
                 self.photon.video_session.session = vk::VideoSessionKHR::null();
             }
