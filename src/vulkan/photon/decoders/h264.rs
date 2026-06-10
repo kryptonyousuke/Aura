@@ -18,6 +18,13 @@ pub trait H264Decoder {
         is_first_frame: bool,
         sps: &vk::native::StdVideoH264SequenceParameterSet,
     ) -> Result<()>;
+    fn parse_nalu_header(
+        &mut self,
+        bitstream_data: &[u8],
+        slice_offsets: &[u32],
+        sps: &vk::native::StdVideoH264SequenceParameterSet,
+        current_slot_idx: usize,
+    ) -> Result<(vk::native::StdVideoDecodeH264PictureInfo)>;
     fn upload_bitstream(&mut self, bitstream_data: &[u8]) -> Result<()>;
     fn present_swapchain(&mut self);
     unsafe fn create_h264_session_parameters(
@@ -129,56 +136,10 @@ impl H264Decoder for DecodingInstance {
                 self.video_command_buffers[self.frames_in_flight_sync_idx],
                 &dependency_info,
             );
-            let slice_offset = slice_offsets[0] as usize;
-            let slice_data = &bitstream_data[slice_offset..];
-            let mut std_pic_info: vk::native::StdVideoDecodeH264PictureInfo =
-                MaybeUninit::zeroed().assume_init();
-            let mut real_frame_num = 0;
-            let mut real_poc = 0;
-            if let Some(nalu_header) = super::super::util::converter::NaluHeader::parse(slice_data)
-            {
-                log::debug!("NALU Parsed: {nalu_header:?}");
-                let is_reference = nalu_header.nal_ref_idc > 0;
-                let is_idr = nalu_header.nal_unit_type == 5;
-                std_pic_info.flags.set_IdrPicFlag(u32::from(is_idr));
-                std_pic_info.flags.set_is_reference(u32::from(is_reference));
-                let sps_info = super::super::util::converter::SpsInfo {
-                    log2_max_frame_num_minus4: sps.log2_max_frame_num_minus4,
-                    frame_mbs_only_flag: sps.flags.frame_mbs_only_flag() != 0,
-                    pic_order_cnt_type: u8::try_from(sps.pic_order_cnt_type)?,
-                    log2_max_pic_order_cnt_lsb_minus4: sps.log2_max_pic_order_cnt_lsb_minus4,
-                };
+            let std_pic_info = self
+                .parse_nalu_header(bitstream_data, slice_offsets, sps, current_slot_idx)
+                .expect("Failed to parse nalu header.");
 
-                if let Some(slice_header) = super::super::util::converter::parse_slice_header(
-                    &slice_data[nalu_header.slice_header_offset..],
-                    nalu_header.nal_unit_type,
-                    &sps_info,
-                ) {
-                    real_frame_num = slice_header.frame_num;
-                    self.dpb_frame_nums[current_slot_idx] = real_frame_num;
-                    real_poc = match sps.pic_order_cnt_type {
-                        0 => slice_header.pic_order_cnt_lsb.cast_signed(),
-                        2 => i32::from(real_frame_num) * 2,
-                        _ => {
-                            log::warn!(
-                                "pic_order_cnt_type {} does not exist, using fallback.",
-                                sps.pic_order_cnt_type
-                            );
-                            i32::from(real_frame_num) * 2
-                        }
-                    };
-                    log::debug!(
-                        "Slice Header successfully decoded. FrameNum: {real_frame_num}, POC: {real_poc}",
-                    );
-                } else {
-                    log::warn!("Failed to parse slice_header, using linear fallback.");
-                    real_frame_num = u16::try_from(self.current_frame_count_idx % 16)?;
-                    real_poc = i32::try_from(self.current_frame_count_idx)?;
-                }
-
-                std_pic_info.frame_num = real_frame_num;
-                std_pic_info.PicOrderCnt = [real_poc, 0];
-            }
             let mut h264_decode_info = vk::VideoDecodeH264PictureInfoKHR::default()
                 .std_picture_info(&std_pic_info)
                 .slice_offsets(slice_offsets);
@@ -401,6 +362,66 @@ impl H264Decoder for DecodingInstance {
             self.current_frame_count_idx += 1;
             Ok(())
         }
+    }
+    fn parse_nalu_header(
+        &mut self,
+        bitstream_data: &[u8],
+        slice_offsets: &[u32],
+        sps: &vk::native::StdVideoH264SequenceParameterSet,
+        current_slot_idx: usize,
+    ) -> Result<vk::native::StdVideoDecodeH264PictureInfo> {
+        let slice_offset = slice_offsets[0] as usize;
+        let slice_data = &bitstream_data[slice_offset..];
+        let mut std_pic_info: vk::native::StdVideoDecodeH264PictureInfo =
+            unsafe { MaybeUninit::zeroed().assume_init() };
+        let real_frame_num;
+        let real_poc;
+        if let Some(nalu_header) =
+            crate::vulkan::photon::util::converter::NaluHeader::parse(slice_data)
+        {
+            log::debug!("NALU Parsed: {nalu_header:?}");
+            let is_reference = nalu_header.nal_ref_idc > 0;
+            let is_idr = nalu_header.nal_unit_type == 5;
+            std_pic_info.flags.set_IdrPicFlag(u32::from(is_idr));
+            std_pic_info.flags.set_is_reference(u32::from(is_reference));
+            let sps_info = super::super::util::converter::SpsInfo {
+                log2_max_frame_num_minus4: sps.log2_max_frame_num_minus4,
+                frame_mbs_only_flag: sps.flags.frame_mbs_only_flag() != 0,
+                pic_order_cnt_type: u8::try_from(sps.pic_order_cnt_type)?,
+                log2_max_pic_order_cnt_lsb_minus4: sps.log2_max_pic_order_cnt_lsb_minus4,
+            };
+
+            if let Some(slice_header) = crate::vulkan::photon::util::converter::parse_slice_header(
+                &slice_data[nalu_header.slice_header_offset..],
+                nalu_header.nal_unit_type,
+                &sps_info,
+            ) {
+                real_frame_num = slice_header.frame_num;
+                self.dpb_frame_nums[current_slot_idx] = real_frame_num;
+                real_poc = match sps.pic_order_cnt_type {
+                    0 => slice_header.pic_order_cnt_lsb.cast_signed(),
+                    2 => i32::from(real_frame_num) * 2,
+                    _ => {
+                        log::warn!(
+                            "pic_order_cnt_type {} does not exist, using fallback.",
+                            sps.pic_order_cnt_type
+                        );
+                        i32::from(real_frame_num) * 2
+                    }
+                };
+                log::debug!(
+                    "Slice Header successfully decoded. FrameNum: {real_frame_num}, POC: {real_poc}",
+                );
+            } else {
+                log::warn!("Failed to parse slice_header, using linear fallback.");
+                real_frame_num = u16::try_from(self.current_frame_count_idx % 16)?;
+                real_poc = i32::try_from(self.current_frame_count_idx)?;
+            }
+
+            std_pic_info.frame_num = real_frame_num;
+            std_pic_info.PicOrderCnt = [real_poc, 0];
+        }
+        Ok(std_pic_info)
     }
     fn upload_bitstream(&mut self, bitstream_data: &[u8]) -> Result<()> {
         self.frames_in_flight_sync_idx = self.current_frame_count_idx % self.frames_in_flight;
