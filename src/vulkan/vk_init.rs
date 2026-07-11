@@ -557,7 +557,7 @@ impl Aura {
             descriptor_sets.clone(),
             video_command_buffers.clone(),
             graphics_command_buffers.clone(),
-            swapchain_images.clone(),
+            swapchain_images.clone(), // target images (shaders will draw here)
             DPB_POOL_SIZE,
             &graphics_complete_semaphores,
             &render_complete_semaphores,

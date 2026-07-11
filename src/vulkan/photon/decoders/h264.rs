@@ -18,13 +18,13 @@ pub trait H264Decoder {
         is_first_frame: bool,
         sps: &vk::native::StdVideoH264SequenceParameterSet,
     ) -> Result<()>;
-    fn parse_nalu_header(
+    fn parse_nalu(
         &mut self,
         bitstream_data: &[u8],
         slice_offsets: &[u32],
         sps: &vk::native::StdVideoH264SequenceParameterSet,
         current_slot_idx: usize,
-    ) -> Result<(vk::native::StdVideoDecodeH264PictureInfo)>;
+    ) -> Result<vk::native::StdVideoDecodeH264PictureInfo>;
     fn upload_bitstream(&mut self, bitstream_data: &[u8]) -> Result<()>;
     fn present_swapchain(&mut self);
     unsafe fn create_h264_session_parameters(
@@ -137,7 +137,7 @@ impl H264Decoder for DecodingInstance {
                 &dependency_info,
             );
             let std_pic_info = self
-                .parse_nalu_header(bitstream_data, slice_offsets, sps, current_slot_idx)
+                .parse_nalu(bitstream_data, slice_offsets, sps, current_slot_idx)
                 .expect("Failed to parse nalu header.");
 
             let mut h264_decode_info = vk::VideoDecodeH264PictureInfoKHR::default()
@@ -363,14 +363,16 @@ impl H264Decoder for DecodingInstance {
             Ok(())
         }
     }
-    fn parse_nalu_header(
+    /// Parse nalu data to get this frame's type details.
+    fn parse_nalu(
         &mut self,
         bitstream_data: &[u8],
         slice_offsets: &[u32],
         sps: &vk::native::StdVideoH264SequenceParameterSet,
         current_slot_idx: usize,
     ) -> Result<vk::native::StdVideoDecodeH264PictureInfo> {
-        let slice_offset = slice_offsets[0] as usize;
+        let slice_offset = usize::try_from(slice_offsets[0])
+            .expect("Failed to convert slice_offsets[0] to usize.");
         let slice_data = &bitstream_data[slice_offset..];
         let mut std_pic_info: vk::native::StdVideoDecodeH264PictureInfo =
             unsafe { MaybeUninit::zeroed().assume_init() };
@@ -380,8 +382,9 @@ impl H264Decoder for DecodingInstance {
             crate::vulkan::photon::util::converter::NaluHeader::parse(slice_data)
         {
             log::debug!("NALU Parsed: {nalu_header:?}");
-            let is_reference = nalu_header.nal_ref_idc > 0;
+            let is_reference = nalu_header.nal_ref_idc != 0; // non-zero means a reference
             let is_idr = nalu_header.nal_unit_type == 5;
+            log::debug!("IDR: {is_idr}");
             std_pic_info.flags.set_IdrPicFlag(u32::from(is_idr));
             std_pic_info.flags.set_is_reference(u32::from(is_reference));
             let sps_info = super::super::util::converter::SpsInfo {
@@ -396,6 +399,7 @@ impl H264Decoder for DecodingInstance {
                 nalu_header.nal_unit_type,
                 &sps_info,
             ) {
+                log::debug!("slice_type: {}", slice_header.slice_type);
                 real_frame_num = slice_header.frame_num;
                 self.dpb_frame_nums[current_slot_idx] = real_frame_num;
                 real_poc = match sps.pic_order_cnt_type {
@@ -423,6 +427,7 @@ impl H264Decoder for DecodingInstance {
         }
         Ok(std_pic_info)
     }
+    /// Uploads the bistream to
     fn upload_bitstream(&mut self, bitstream_data: &[u8]) -> Result<()> {
         self.frames_in_flight_sync_idx = self.current_frame_count_idx % self.frames_in_flight;
         unsafe {
@@ -438,6 +443,7 @@ impl H264Decoder for DecodingInstance {
             return Ok(());
         }
     }
+    /// Presents a image that was decoded into a swapchain directly to the window.
     fn present_swapchain(&mut self) {
         if let Some(swapchain) = self.swapchain
             && let Some(swapchain_loader) = &self.swapchain_loader

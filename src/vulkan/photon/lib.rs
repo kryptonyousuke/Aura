@@ -193,6 +193,19 @@ impl DecodingInstance {
     pub fn set_target_available_image_idx(&mut self, target_available_image_idx: u32) {
         self.target_available_image_idx = target_available_image_idx;
     }
+    pub fn set_swapchain(&mut self, swapchain: vk::SwapchainKHR) {
+        self.swapchain = Some(swapchain);
+    }
+    pub fn update_target(&mut self, images: Vec<vk::Image>, image_views: Vec<vk::ImageView>) {
+        self.set_target_images(images);
+        self.set_target_image_views(image_views);
+    }
+    pub fn set_target_image_views(&mut self, image_views: Vec<vk::ImageView>) {
+        self.target_image_views = image_views;
+    }
+    pub fn set_target_images(&mut self, images: Vec<vk::Image>) {
+        self.target_images = images;
+    }
 }
 // Draft, won't work.
 // impl Drop for DecodingInstance {

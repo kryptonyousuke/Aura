@@ -138,4 +138,51 @@ impl Aura {
 
         self.photon.set_target_available_image_idx(next_target_img);
     }
+    pub fn recreate_swapchain(
+        instance: &ash::Instance,
+        surface_loader: &ash::khr::surface::Instance,
+        surface: vk::SurfaceKHR,
+        physical_device: vk::PhysicalDevice,
+        device: &ash::Device,
+        window: &winit::window::Window,
+        swapchain: vk::SwapchainKHR,
+        swapchain_loader: &ash::khr::swapchain::Device,
+        swapchain_image_views: &[vk::ImageView],
+        graphics_queue: vk::Queue,
+        video_queue: vk::Queue,
+    ) -> (
+        ash::khr::swapchain::Device,
+        vk::SwapchainKHR,
+        Vec<vk::Image>,
+        Vec<vk::ImageView>,
+        ash::vk::Format,
+        vk::Extent2D,
+    ) {
+        if device.handle() != vk::Device::null() {
+            unsafe {
+                let () = device.queue_wait_idle(graphics_queue).unwrap();
+                let () = device.queue_wait_idle(video_queue).unwrap();
+                let () = device.device_wait_idle().unwrap();
+            }
+        }
+
+        for &view in swapchain_image_views {
+            unsafe { device.destroy_image_view(view, None) };
+        }
+        log::debug!("Swapchain's Image Views were successfully destroyed.");
+
+        unsafe {
+            swapchain_loader.destroy_swapchain(swapchain, None);
+        };
+        unsafe {
+            Aura::create_swapchain(
+                instance,
+                surface_loader,
+                surface,
+                physical_device,
+                device,
+                window,
+            )
+        }
+    }
 }
