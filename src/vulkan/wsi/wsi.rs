@@ -162,37 +162,35 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => {
                 println!("w{} h{}", size.width, size.height);
                 if let (Some(aura), Some(window)) = (&mut self.aura, &self.window) {
-                    if !self.window.is_none() {
-                        let (
-                            swapchain_loader,
-                            swapchain,
-                            swapchain_images,
-                            swapchain_image_views,
-                            swapchain_format,
-                            swapchain_extent,
-                        ) = Aura::recreate_swapchain(
-                            &aura._instance,
-                            &aura.surface_loader,
-                            aura.surface,
-                            aura.physical_device,
-                            &aura.device,
-                            window,
-                            aura.swapchain,
-                            &aura.swapchain_loader,
-                            &aura.swapchain_image_views,
-                            aura.graphics_queue,
-                            aura.video_queue,
-                        );
-                        aura.photon.set_swapchain(swapchain);
-                        aura.photon
-                            .update_target(swapchain_images.clone(), swapchain_image_views.clone());
-                        aura.swapchain_loader = swapchain_loader;
-                        aura.swapchain = swapchain;
-                        aura.swapchain_images = swapchain_images;
-                        aura.swapchain_image_views = swapchain_image_views;
-                        aura.swapchain_format = swapchain_format;
-                        aura.swapchain_extent = swapchain_extent;
-                    }
+                    let (
+                        swapchain_loader,
+                        swapchain,
+                        swapchain_images,
+                        swapchain_image_views,
+                        swapchain_format,
+                        swapchain_extent,
+                    ) = Aura::recreate_swapchain(
+                        &aura._instance,
+                        &aura.surface_loader,
+                        aura.surface,
+                        aura.physical_device,
+                        &aura.device,
+                        window,
+                        aura.swapchain,
+                        &aura.swapchain_loader,
+                        &aura.swapchain_image_views,
+                        aura.graphics_queue,
+                        aura.video_queue,
+                    );
+                    aura.photon.set_swapchain(swapchain);
+                    aura.photon
+                        .update_target(swapchain_images.clone(), swapchain_image_views.clone());
+                    aura.swapchain_loader = swapchain_loader;
+                    aura.swapchain = swapchain;
+                    aura.swapchain_images = swapchain_images;
+                    aura.swapchain_image_views = swapchain_image_views;
+                    aura.swapchain_format = swapchain_format;
+                    aura.swapchain_extent = swapchain_extent;
                 }
             }
             _ => (),
