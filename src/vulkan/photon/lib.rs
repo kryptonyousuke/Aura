@@ -206,6 +206,15 @@ impl DecodingInstance {
     pub fn set_target_images(&mut self, images: Vec<vk::Image>) {
         self.target_images = images;
     }
+    pub fn set_viewport(&mut self, viewport: vk::Viewport) {
+        self.viewport = viewport;
+    }
+    pub fn set_scissor(&mut self, scissor: vk::Rect2D) {
+        self.scissor = scissor;
+    }
+    pub fn set_render_extent(&mut self, render_extent: vk::Extent2D) {
+        self.render_extent = render_extent;
+    }
 }
 // Draft, won't work.
 // impl Drop for DecodingInstance {

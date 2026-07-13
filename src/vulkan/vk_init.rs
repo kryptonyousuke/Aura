@@ -1,7 +1,6 @@
 use super::debug;
 use crate::video::video_context::VideoContext;
 use crate::vulkan::photon;
-use crate::vulkan::photon::decoder::{Decoder, DecodingSession};
 use crate::vulkan::photon::sampler::Sampler;
 use crate::vulkan::photon::types::VideoCodecsProfiles::VideoProfile;
 use crate::vulkan::photon::types::{DecodeExtensions, SupportedCodecs, VideoCodecsProfiles};
@@ -9,7 +8,7 @@ use crate::vulkan::pipeline::Pipeline;
 use crate::vulkan::shaders::Shaders;
 use ash::{
     Entry, Instance,
-    khr::{video_decode_queue::Device as VideoDecodeLoader, video_queue},
+    khr::video_queue,
     vk,
     vk::{DebugUtilsMessengerEXT, TaggedStructure},
 };
@@ -22,6 +21,7 @@ pub const SWAPHAIN_IMAGE_COUNT: u8 = 4;
 pub const FRAMES_IN_FLIGHT: u8 = SWAPHAIN_IMAGE_COUNT - 1;
 const DPB_POOL_SIZE: usize = 16;
 
+#[allow(dead_code)]
 pub struct Aura {
     pub _entry: Entry,
     pub _instance: Instance,

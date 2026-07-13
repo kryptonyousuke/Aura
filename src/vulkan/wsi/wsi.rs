@@ -1,8 +1,11 @@
+use std::f64;
+
 use crate::video::video_clock::VideoClock;
 use crate::video::video_context::VideoContext;
 use crate::vulkan::photon::decoders::h264::H264Decoder;
 use crate::vulkan::photon::util::converter::avcc_to_annexb;
 use crate::vulkan::vk_init::Aura;
+use ash::vk;
 use ffmpeg_next as ffmpeg;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -160,7 +163,6 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Resized(size) => {
-                println!("w{} h{}", size.width, size.height);
                 if let (Some(aura), Some(window)) = (&mut self.aura, &self.window) {
                     let (
                         swapchain_loader,
@@ -182,6 +184,16 @@ impl ApplicationHandler for App {
                         aura.graphics_queue,
                         aura.video_queue,
                     );
+                    aura.photon.set_viewport(
+                        vk::Viewport::default()
+                            .width(size.width as f32)
+                            .height(size.height as f32),
+                    );
+                    aura.photon.set_scissor(vk::Rect2D {
+                        offset: vk::Offset2D { x: 0, y: 0 },
+                        extent: swapchain_extent,
+                    });
+                    aura.photon.set_render_extent(swapchain_extent);
                     aura.photon.set_swapchain(swapchain);
                     aura.photon
                         .update_target(swapchain_images.clone(), swapchain_image_views.clone());
