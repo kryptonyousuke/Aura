@@ -184,11 +184,14 @@ impl ApplicationHandler for App {
                         aura.graphics_queue,
                         aura.video_queue,
                     );
+
+                    #[allow(clippy::cast_precision_loss)]
                     aura.photon.set_viewport(
                         vk::Viewport::default()
                             .width(size.width as f32)
                             .height(size.height as f32),
                     );
+
                     aura.photon.set_scissor(vk::Rect2D {
                         offset: vk::Offset2D { x: 0, y: 0 },
                         extent: swapchain_extent,

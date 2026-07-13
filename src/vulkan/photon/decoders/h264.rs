@@ -440,7 +440,7 @@ impl H264Decoder for DecodingInstance {
             let () = self
                 .device
                 .reset_fences(&[self.video_fences[self.frames_in_flight_sync_idx]])?;
-            return Ok(());
+            Ok(())
         }
     }
     /// Presents a image that was decoded into a swapchain directly to the window.
