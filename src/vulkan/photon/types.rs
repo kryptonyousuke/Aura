@@ -16,15 +16,6 @@ pub struct SupportedCodecs {
     pub h265: bool,
     pub av1: bool,
 }
-impl SupportedCodecs {
-    fn default() -> Self {
-        Self {
-            h264: false,
-            h265: false,
-            av1: false,
-        }
-    }
-}
 
 /// Wrapper for profiles enums of `vk::native`.
 #[allow(non_snake_case)]
