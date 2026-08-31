@@ -10,6 +10,7 @@ use ash::khr::video_queue;
 use ash::vk::TaggedStructure;
 use ash::{Device, vk};
 use std::mem::MaybeUninit;
+
 pub trait H264Decoder {
     fn decode_frame(
         &mut self,
@@ -46,6 +47,7 @@ impl H264Decoder for DecodingInstance {
         let current_slot_idx = self.current_frame_count_idx % self.dpb_pool_size;
         let (dst_image, _, dst_view) = self.dst_pool[current_slot_idx];
         let (_dpb_image, _, dpb_view) = self.dpb_pool[current_slot_idx];
+
         log::debug!("current_frame_count_idx: {}", self.current_frame_count_idx);
         log::debug!("dpb_pool_size: {}", self.dpb_pool_size);
         log::debug!("current_slot_idx: {current_slot_idx}");
@@ -54,7 +56,8 @@ impl H264Decoder for DecodingInstance {
             "target_available_image_idx: {}",
             self.target_available_image_idx
         );
-        let aligned_size = self.bitstream_sizes[self.frames_in_flight_sync_idx];
+
+        let aligned_bitstream_size = self.bitstream_sizes[self.frames_in_flight_sync_idx];
         unsafe {
             let color_attachment_info = vk::RenderingAttachmentInfoKHR::default()
                 .image_view(self.target_image_views[self.target_available_image_idx as usize])
@@ -158,16 +161,27 @@ impl H264Decoder for DecodingInstance {
                 .image_view_binding(dpb_view)
                 .coded_extent(self.video_extent)
                 .base_array_layer(0);
-            let setup_slot_decode = vk::VideoReferenceSlotInfoKHR::default()
+
+            // If the image is a reference, it will be stored here.
+            #[allow(unused_variables)]
+            let current_dpb_slot = vk::VideoReferenceSlotInfoKHR::default()
                 .slot_index(i32::try_from(current_slot_idx)?)
                 .picture_resource(&setup_resource)
                 .push(&mut h264_setup_slot_info_decode);
+
+            /* The first slot (for the first frame) of the decodification must have a slot
+             * index = -1 in order to identificate that it does not need an actual reference.
+             * The resource itself remains the same, but it is not actually used.
+             */
             let setup_slot_begin = vk::VideoReferenceSlotInfoKHR::default()
                 .slot_index(-1)
                 .picture_resource(&setup_resource)
                 .push(&mut h264_setup_slot_info_begin);
 
+            // Real slot array.
             let reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = Vec::new();
+
+            // Stub slot array for the initialization.
             let coding_reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = vec![setup_slot_begin];
 
             // --------------------- Start of the decodification.------------------------ //
@@ -190,18 +204,20 @@ impl H264Decoder for DecodingInstance {
                 );
             }
 
-            // Decode the bitstream
             let dst_resource = vk::VideoPictureResourceInfoKHR::default()
                 .image_view_binding(dst_view)
                 .coded_extent(self.video_extent)
                 .base_array_layer(0);
 
+            /* Decode the bitstream and store the result into DPB (picture resource).
+             * The setup slot is only needed for the first frame, but keep it here won't hurt.
+             */
             let decode_info = vk::VideoDecodeInfoKHR::default()
                 .src_buffer(self.bitstream_buffers[self.frames_in_flight_sync_idx])
                 .src_buffer_offset(0)
-                .src_buffer_range(u64::from(aligned_size))
+                .src_buffer_range(u64::from(aligned_bitstream_size))
                 .dst_picture_resource(dst_resource)
-                .setup_reference_slot(&setup_slot_decode)
+                .setup_reference_slot(&setup_slot_begin)
                 .reference_slots(&reference_slots)
                 .push(&mut h264_decode_info);
 
@@ -225,10 +241,9 @@ impl H264Decoder for DecodingInstance {
             );
             self.device
                 .end_command_buffer(self.video_command_buffers[self.frames_in_flight_sync_idx])
-                .expect("Erro buffer");
+                .expect("Video command buffer failed.");
 
-            let video_command_buffer_submit_info = &[vk::CommandBufferSubmitInfo::default()
-                .command_buffer(self.video_command_buffers[self.frames_in_flight_sync_idx])];
+            // Sync.
             let render_semaphores_submit_info = &[vk::SemaphoreSubmitInfo::default()
                 .semaphore(
                     self.decode_complete_semaphores[self.target_available_image_idx as usize],
@@ -236,6 +251,10 @@ impl H264Decoder for DecodingInstance {
                 .stage_mask(vk::PipelineStageFlags2::VIDEO_DECODE_KHR)];
             let wait_to_decode_semaphores_submit_info = &[vk::SemaphoreSubmitInfo::default()
                 .semaphore(self.wait_to_decode_semaphores[self.frames_in_flight_sync_idx])];
+
+            // Submit video commands.
+            let video_command_buffer_submit_info = &[vk::CommandBufferSubmitInfo::default()
+                .command_buffer(self.video_command_buffers[self.frames_in_flight_sync_idx])];
             let submit_info = vk::SubmitInfo2::default()
                 .command_buffer_infos(video_command_buffer_submit_info)
                 .wait_semaphore_infos(wait_to_decode_semaphores_submit_info)
@@ -385,6 +404,7 @@ impl H264Decoder for DecodingInstance {
             let is_reference = nalu_header.nal_ref_idc != 0; // non-zero means a reference
             let is_idr = nalu_header.nal_unit_type == 5;
             log::debug!("IDR: {is_idr}");
+            log::debug!("REF: {is_reference}");
             std_pic_info.flags.set_IdrPicFlag(u32::from(is_idr));
             std_pic_info.flags.set_is_reference(u32::from(is_reference));
             let sps_info = super::super::util::converter::SpsInfo {
@@ -399,11 +419,39 @@ impl H264Decoder for DecodingInstance {
                 nalu_header.nal_unit_type,
                 &sps_info,
             ) {
+                if is_idr {
+                    self.poc_state.prev_poc_msb = 0;
+                    self.poc_state.prev_poc_lsb = 0;
+                }
                 log::debug!("slice_type: {}", slice_header.slice_type);
                 real_frame_num = slice_header.frame_num;
                 self.dpb_frame_nums[current_slot_idx] = real_frame_num;
                 real_poc = match sps.pic_order_cnt_type {
-                    0 => slice_header.pic_order_cnt_lsb.cast_signed(),
+                    0 => {
+                        let max_poc_lsb =
+                            2i32.pow(u32::from(sps.log2_max_pic_order_cnt_lsb_minus4) + 4);
+                        let cur_lsb = i32::try_from(slice_header.pic_order_cnt_lsb).unwrap_or(0);
+                        let prev_lsb = self.poc_state.prev_poc_lsb;
+                        let prev_msb = self.poc_state.prev_poc_msb;
+
+                        let cur_msb = if (cur_lsb < prev_lsb)
+                            && ((prev_lsb - cur_lsb) >= (max_poc_lsb / 2))
+                        {
+                            prev_msb + max_poc_lsb
+                        } else if (cur_lsb > prev_lsb) && ((cur_lsb - prev_lsb) > (max_poc_lsb / 2))
+                        {
+                            prev_msb - max_poc_lsb
+                        } else {
+                            prev_msb
+                        };
+
+                        if nalu_header.nal_ref_idc != 0 {
+                            self.poc_state.prev_poc_msb = cur_msb;
+                            self.poc_state.prev_poc_lsb = cur_lsb;
+                        }
+
+                        cur_msb + cur_lsb
+                    }
                     2 => i32::from(real_frame_num) * 2,
                     _ => {
                         log::warn!(
@@ -413,6 +461,11 @@ impl H264Decoder for DecodingInstance {
                         i32::from(real_frame_num) * 2
                     }
                 };
+                if sps.flags.frame_mbs_only_flag() != 0 {
+                    std_pic_info.PicOrderCnt = [real_poc, real_poc];
+                } else {
+                    std_pic_info.PicOrderCnt = [real_poc, 0];
+                }
                 log::debug!(
                     "Slice Header successfully decoded. FrameNum: {real_frame_num}, POC: {real_poc}",
                 );
@@ -420,11 +473,12 @@ impl H264Decoder for DecodingInstance {
                 log::warn!("Failed to parse slice_header, using linear fallback.");
                 real_frame_num = u16::try_from(self.current_frame_count_idx % 16)?;
                 real_poc = i32::try_from(self.current_frame_count_idx)?;
+                std_pic_info.PicOrderCnt = [real_poc, 0];
             }
 
             std_pic_info.frame_num = real_frame_num;
-            std_pic_info.PicOrderCnt = [real_poc, 0];
         }
+
         Ok(std_pic_info)
     }
     /// Uploads the bistream to

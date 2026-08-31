@@ -5,6 +5,12 @@ use crate::vulkan::{photon::types::PhotonError, pipeline};
 use anyhow::Result;
 use ash::{self, khr, vk};
 
+#[derive(Default)]
+pub struct PocState {
+    pub prev_poc_msb: i32,
+    pub prev_poc_lsb: i32,
+}
+
 pub struct DecodingInstance {
     pub(crate) _video_queue_family_index: u32,
     pub(crate) _graphics_queue_family_index: u32,
@@ -25,6 +31,7 @@ pub struct DecodingInstance {
 
     pub(crate) frames_in_flight_sync_idx: usize,
     pub(crate) target_available_image_idx: u32,
+    pub(crate) poc_state: PocState,
     pub(crate) bitstream_memories: Vec<vk::DeviceMemory>,
     pub(crate) target_image_views: Vec<vk::ImageView>,
     pub(crate) render_extent: vk::Extent2D,
@@ -161,6 +168,7 @@ impl DecodingInstance {
 
             frames_in_flight_sync_idx: 0,
             target_available_image_idx: target_available_image_idx,
+            poc_state: PocState::default(),
             target_image_views: target_image_views,
             render_extent: render_extent,
             render_offsets: render_offsets,
