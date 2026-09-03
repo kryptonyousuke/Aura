@@ -200,9 +200,7 @@ impl H264Decoder for DecodingInstance {
                 .coded_extent(self.video_extent)
                 .base_array_layer(0);
 
-            /* Decode the bitstream and store the result into DPB (picture resource).
-             * The setup slot is only needed for the first frame, but keep it here won't hurt.
-             */
+            // Decode the bitstream and store the result into DPB (picture resource).
             let decode_info = vk::VideoDecodeInfoKHR::default()
                 .src_buffer(self.bitstream_buffers[self.frames_in_flight_sync_idx])
                 .src_buffer_offset(0)
