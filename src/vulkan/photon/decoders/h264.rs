@@ -481,16 +481,16 @@ impl H264Decoder for DecodingInstance {
 
         Ok(std_pic_info)
     }
-    /// Uploads the bistream to
+    /// Uploads the bistream to VRAM.
     fn upload_bitstream(&mut self, bitstream_data: &[u8]) -> Result<()> {
         self.frames_in_flight_sync_idx = self.current_frame_count_idx % self.frames_in_flight;
         unsafe {
-            self.upload_bitstream_packet(bitstream_data, self.frames_in_flight_sync_idx);
             let () = self.device.wait_for_fences(
                 &[self.video_fences[self.frames_in_flight_sync_idx]],
                 true,
                 u64::MAX,
             )?;
+            self.upload_bitstream_packet(bitstream_data, self.frames_in_flight_sync_idx);
             let () = self
                 .device
                 .reset_fences(&[self.video_fences[self.frames_in_flight_sync_idx]])?;

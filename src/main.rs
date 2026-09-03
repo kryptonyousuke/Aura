@@ -10,6 +10,9 @@ use winit::event_loop::EventLoop;
 struct Args {
     #[arg(short, long)]
     file_name: String,
+
+    #[arg(short, long)]
+    no_sync: bool,
 }
 
 fn main() -> Result<()> {
@@ -18,7 +21,7 @@ fn main() -> Result<()> {
     pretty_env_logger::init();
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
-    let mut app = vulkan::wsi::wsi::App::new(args.file_name);
+    let mut app = vulkan::wsi::wsi::App::new(args.file_name, args.no_sync);
     let () = event_loop.run_app(&mut app)?;
     Ok(())
 }

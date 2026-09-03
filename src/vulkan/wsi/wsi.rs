@@ -15,15 +15,17 @@ use winit::window::{Window, WindowId};
 #[derive(Default)]
 pub struct App {
     file_name: String,
+    no_sync: bool,
     window: Option<Window>,
     pub aura: Option<Aura>,
     video_ctx: Option<VideoContext>,
 }
 
 impl App {
-    pub fn new(file_name: String) -> Self {
+    pub fn new(file_name: String, no_sync: bool) -> Self {
         Self {
             file_name,
+            no_sync,
             window: None,
             aura: None,
             video_ctx: None,
@@ -115,6 +117,7 @@ impl ApplicationHandler for App {
                                     if let Some(pts) = packet.pts().or_else(|| packet.dts())
                                         && let Some(wait_duration) =
                                             v_ctx.clock.time_till_next_frame(pts)
+                                        && !self.no_sync
                                     {
                                         std::thread::sleep(wait_duration);
                                     }
