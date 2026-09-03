@@ -155,40 +155,31 @@ impl H264Decoder for DecodingInstance {
             let mut h264_setup_slot_info_decode =
                 vk::VideoDecodeH264DpbSlotInfoKHR::default().std_reference_info(&std_setup_info);
 
-            let mut h264_setup_slot_info_begin =
-                vk::VideoDecodeH264DpbSlotInfoKHR::default().std_reference_info(&std_setup_info);
             let setup_resource = vk::VideoPictureResourceInfoKHR::default()
                 .image_view_binding(dpb_view)
                 .coded_extent(self.video_extent)
                 .base_array_layer(0);
 
-            // If the image is a reference, it will be stored here.
-            #[allow(unused_variables)]
-            let current_dpb_slot = vk::VideoReferenceSlotInfoKHR::default()
+            let setup_slot = vk::VideoReferenceSlotInfoKHR::default()
                 .slot_index(i32::try_from(current_slot_idx)?)
                 .picture_resource(&setup_resource)
                 .push(&mut h264_setup_slot_info_decode);
 
-            /* The first slot (for the first frame) of the decodification must have a slot
-             * index = -1 in order to identificate that it does not need an actual reference.
-             * The resource itself remains the same, but it is not actually used.
-             */
-            let setup_slot_begin = vk::VideoReferenceSlotInfoKHR::default()
-                .slot_index(-1)
-                .picture_resource(&setup_resource)
-                .push(&mut h264_setup_slot_info_begin);
+            let setup_slot_binder = setup_slot.clone().slot_index(-1);
 
             // Real slot array.
             let reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = Vec::new();
 
-            // Stub slot array for the initialization.
-            let coding_reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = vec![setup_slot_begin];
+            /* Before using the slot, we need to bind the picture resource as usable for this
+             * video session — slot_index = -1 means a slot binding.
+             */
+            let bound_reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = vec![setup_slot_binder];
 
             // --------------------- Start of the decodification.------------------------ //
             let begin_coding_info = vk::VideoBeginCodingInfoKHR::default()
                 .video_session(self.video_session.session)
                 .video_session_parameters(self.video_session.session_parameters)
-                .reference_slots(&coding_reference_slots);
+                .reference_slots(&bound_reference_slots);
 
             self.video_session.video_device.cmd_begin_video_coding(
                 self.video_command_buffers[self.frames_in_flight_sync_idx],
@@ -217,7 +208,7 @@ impl H264Decoder for DecodingInstance {
                 .src_buffer_offset(0)
                 .src_buffer_range(u64::from(aligned_bitstream_size))
                 .dst_picture_resource(dst_resource)
-                .setup_reference_slot(&setup_slot_begin)
+                .setup_reference_slot(&setup_slot)
                 .reference_slots(&reference_slots)
                 .push(&mut h264_decode_info);
 

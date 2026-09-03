@@ -191,7 +191,7 @@ impl Decoder for DecodingInstance {
                     width: 4096,
                     height: 4096,
                 })
-                .max_dpb_slots(16)
+                .max_dpb_slots(17)
                 .max_active_reference_pictures(16)
                 .std_header_version(&header_version);
 

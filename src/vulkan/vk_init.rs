@@ -19,7 +19,7 @@ use std::ffi::CStr;
 
 pub const SWAPHAIN_IMAGE_COUNT: u8 = 4;
 pub const FRAMES_IN_FLIGHT: u8 = SWAPHAIN_IMAGE_COUNT - 1;
-const DPB_POOL_SIZE: usize = 16;
+const DPB_POOL_SIZE: usize = 17;
 
 #[allow(dead_code)]
 pub struct Aura {
