@@ -155,20 +155,20 @@ impl H264Decoder for DecodingInstance {
             let mut h264_setup_slot_info_decode =
                 vk::VideoDecodeH264DpbSlotInfoKHR::default().std_reference_info(&std_setup_info);
 
-            let setup_resource = vk::VideoPictureResourceInfoKHR::default()
+            let dpb_resource = vk::VideoPictureResourceInfoKHR::default()
                 .image_view_binding(dpb_view)
                 .coded_extent(self.video_extent)
                 .base_array_layer(0);
 
             let setup_slot = vk::VideoReferenceSlotInfoKHR::default()
                 .slot_index(i32::try_from(current_slot_idx)?)
-                .picture_resource(&setup_resource)
+                .picture_resource(&dpb_resource)
                 .push(&mut h264_setup_slot_info_decode);
 
             let setup_slot_binder = setup_slot.clone().slot_index(-1);
 
             // Real slot array.
-            let reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = Vec::new();
+            let mut reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = Vec::new();
 
             /* Before using the slot, we need to bind the picture resource as usable for this
              * video session — slot_index = -1 means a slot binding.
@@ -205,7 +205,7 @@ impl H264Decoder for DecodingInstance {
                 .src_buffer(self.bitstream_buffers[self.frames_in_flight_sync_idx])
                 .src_buffer_offset(0)
                 .src_buffer_range(u64::from(aligned_bitstream_size))
-                .dst_picture_resource(dst_resource)
+                .dst_picture_resource(dst_resource) // for DISTINCT
                 .setup_reference_slot(&setup_slot)
                 .reference_slots(&reference_slots)
                 .push(&mut h264_decode_info);
@@ -251,6 +251,9 @@ impl H264Decoder for DecodingInstance {
 
             self.device
                 .queue_submit2(self.video_queue, &[submit_info], vk::Fence::null())?;
+            if std_pic_info.flags.is_reference() > 0 {
+                reference_slots.push(setup_slot);
+            }
             // ---------------------- End of the decodification.------------------------ //
 
             self.device.begin_command_buffer(

@@ -1,5 +1,6 @@
 use std::f64;
 
+use super::args::Args;
 use crate::video::video_clock::VideoClock;
 use crate::video::video_context::VideoContext;
 use crate::vulkan::photon::decoders::h264::H264Decoder;
@@ -12,20 +13,17 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::{Window, WindowId};
 
-#[derive(Default)]
 pub struct App {
-    file_name: String,
-    no_sync: bool,
+    args: Args,
     window: Option<Window>,
     pub aura: Option<Aura>,
     video_ctx: Option<VideoContext>,
 }
 
 impl App {
-    pub fn new(file_name: String, no_sync: bool) -> Self {
+    pub fn new(args: Args) -> Self {
         Self {
-            file_name,
-            no_sync,
+            args: args,
             window: None,
             aura: None,
             video_ctx: None,
@@ -41,7 +39,7 @@ impl ApplicationHandler for App {
                 .with_inner_size(winit::dpi::LogicalSize::new(1920.0, 1080.0));
 
             let window = event_loop.create_window(window_attributes).unwrap();
-            let video_path = self.file_name.clone();
+            let video_path = self.args.file_name.clone();
             let ictx = ffmpeg::format::input(&video_path).unwrap();
             let input_stream = ictx.streams().best(ffmpeg::media::Type::Video).unwrap();
             let video_stream_index = input_stream.index();
@@ -117,9 +115,14 @@ impl ApplicationHandler for App {
                                     if let Some(pts) = packet.pts().or_else(|| packet.dts())
                                         && let Some(wait_duration) =
                                             v_ctx.clock.time_till_next_frame(pts)
-                                        && !self.no_sync
+                                        && !self.args.no_sync
+                                        && self.args.custom_clock_interval == 0
                                     {
                                         std::thread::sleep(wait_duration);
+                                    } else if self.args.custom_clock_interval > 0 {
+                                        std::thread::sleep(std::time::Duration::from_millis(
+                                            self.args.custom_clock_interval,
+                                        ));
                                     }
                                     let std_sps =
                                         crate::vulkan::photon::decoders::h264_parser::parse_sps(
