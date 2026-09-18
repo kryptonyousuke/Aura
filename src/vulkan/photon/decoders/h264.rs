@@ -18,12 +18,14 @@ pub trait H264Decoder {
         slice_offsets: &[u32],
         is_first_frame: bool,
         sps: &vk::native::StdVideoH264SequenceParameterSet,
+        pps: &vk::native::StdVideoH264PictureParameterSet,
     ) -> Result<()>;
     fn parse_nalu(
         &mut self,
         bitstream_data: &[u8],
         slice_offsets: &[u32],
         sps: &vk::native::StdVideoH264SequenceParameterSet,
+        pps: &vk::native::StdVideoH264PictureParameterSet,
         current_slot_idx: usize,
     ) -> Result<vk::native::StdVideoDecodeH264PictureInfo>;
     fn upload_bitstream(&mut self, bitstream_data: &[u8]) -> Result<()>;
@@ -35,7 +37,7 @@ pub trait H264Decoder {
         session: vk::VideoSessionKHR,
     ) -> vk::VideoSessionParametersKHR;
 }
-impl H264Decoder for DecodingInstance {
+impl H264Decoder for DecodingInstance<'_> {
     /// Decodes a h264 frame and write it into a target image.
     fn decode_frame(
         &mut self,
@@ -43,6 +45,7 @@ impl H264Decoder for DecodingInstance {
         slice_offsets: &[u32],
         is_first_frame: bool,
         sps: &vk::native::StdVideoH264SequenceParameterSet,
+        pps: &vk::native::StdVideoH264PictureParameterSet,
     ) -> Result<()> {
         let current_slot_idx = self.current_frame_count_idx % self.dpb_pool_size;
         let (dst_image, _, dst_view) = self.dst_pool[current_slot_idx];
@@ -140,7 +143,7 @@ impl H264Decoder for DecodingInstance {
                 &dependency_info,
             );
             let std_pic_info = self
-                .parse_nalu(bitstream_data, slice_offsets, sps, current_slot_idx)
+                .parse_nalu(bitstream_data, slice_offsets, sps, pps, current_slot_idx)
                 .expect("Failed to parse nalu header.");
 
             let mut h264_decode_info = vk::VideoDecodeH264PictureInfoKHR::default()
@@ -149,26 +152,33 @@ impl H264Decoder for DecodingInstance {
 
             let mut std_setup_info: vk::native::StdVideoDecodeH264ReferenceInfo =
                 MaybeUninit::zeroed().assume_init();
+            if self.ref_std_infos.len() == 0 {
+                self.ref_std_infos = vec![std_setup_info; 17];
+            }
             std_setup_info.FrameNum = std_pic_info.frame_num;
             std_setup_info.PicOrderCnt = std_pic_info.PicOrderCnt;
+            self.ref_std_infos[current_slot_idx] = std_setup_info;
+            if self.ref_resources.len() == 0 {
+                self.ref_resources = vec![vk::VideoPictureResourceInfoKHR::default(); 17];
+            }
+            let mut ref_slot_infos =
+                vec![
+                    vk::VideoDecodeH264DpbSlotInfoKHR::default()
+                        .std_reference_info(&self.ref_std_infos[current_slot_idx]);
+                    17
+                ];
 
-            let mut h264_setup_slot_info_decode =
-                vk::VideoDecodeH264DpbSlotInfoKHR::default().std_reference_info(&std_setup_info);
-
-            let dpb_resource = vk::VideoPictureResourceInfoKHR::default()
+            self.ref_resources[current_slot_idx] = vk::VideoPictureResourceInfoKHR::default()
                 .image_view_binding(dpb_view)
                 .coded_extent(self.video_extent)
                 .base_array_layer(0);
 
             let setup_slot = vk::VideoReferenceSlotInfoKHR::default()
                 .slot_index(i32::try_from(current_slot_idx)?)
-                .picture_resource(&dpb_resource)
-                .push(&mut h264_setup_slot_info_decode);
+                .picture_resource(&self.ref_resources[current_slot_idx])
+                .push(&mut ref_slot_infos[current_slot_idx]);
 
             let setup_slot_binder = setup_slot.clone().slot_index(-1);
-
-            // Real slot array.
-            let mut reference_slots: Vec<vk::VideoReferenceSlotInfoKHR> = Vec::new();
 
             /* Before using the slot, we need to bind the picture resource as usable for this
              * video session — slot_index = -1 means a slot binding.
@@ -207,7 +217,7 @@ impl H264Decoder for DecodingInstance {
                 .src_buffer_range(u64::from(aligned_bitstream_size))
                 .dst_picture_resource(dst_resource) // for DISTINCT
                 .setup_reference_slot(&setup_slot)
-                .reference_slots(&reference_slots)
+                .reference_slots(&self.reference_slots)
                 .push(&mut h264_decode_info);
 
             self.video_session.decode_loader.cmd_decode_video(
@@ -251,8 +261,13 @@ impl H264Decoder for DecodingInstance {
 
             self.device
                 .queue_submit2(self.video_queue, &[submit_info], vk::Fence::null())?;
+            if std_pic_info.flags.IdrPicFlag() > 0 {
+                // IDR frames resets the DPB.
+                self.reference_slots.clear();
+            }
             if std_pic_info.flags.is_reference() > 0 {
-                reference_slots.push(setup_slot);
+                //self.reference_slots.push(setup_slot);
+                log::debug!("New reference slot added.");
             }
             // ---------------------- End of the decodification.------------------------ //
 
@@ -380,6 +395,7 @@ impl H264Decoder for DecodingInstance {
         bitstream_data: &[u8],
         slice_offsets: &[u32],
         sps: &vk::native::StdVideoH264SequenceParameterSet,
+        pps: &vk::native::StdVideoH264PictureParameterSet,
         current_slot_idx: usize,
     ) -> Result<vk::native::StdVideoDecodeH264PictureInfo> {
         let slice_offset = usize::try_from(slice_offsets[0])
@@ -406,10 +422,16 @@ impl H264Decoder for DecodingInstance {
                 log2_max_pic_order_cnt_lsb_minus4: sps.log2_max_pic_order_cnt_lsb_minus4,
             };
 
+            let pps_info = super::super::util::converter::PpsInfo {
+                num_ref_idx_l0_default_active_minus1: pps.num_ref_idx_l0_default_active_minus1,
+                num_ref_idx_l1_default_active_minus1: pps.num_ref_idx_l1_default_active_minus1,
+            };
+
             if let Some(slice_header) = crate::vulkan::photon::util::converter::parse_slice_header(
                 &slice_data[nalu_header.slice_header_offset..],
                 nalu_header.nal_unit_type,
                 &sps_info,
+                &pps_info,
             ) {
                 if is_idr {
                     self.poc_state.prev_poc_msb = 0;

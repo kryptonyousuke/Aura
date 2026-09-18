@@ -11,7 +11,7 @@ pub struct PocState {
     pub prev_poc_lsb: i32,
 }
 
-pub struct DecodingInstance {
+pub struct DecodingInstance<'decoding> {
     pub(crate) _video_queue_family_index: u32,
     pub(crate) _graphics_queue_family_index: u32,
     pub(crate) device: ash::Device,
@@ -44,6 +44,9 @@ pub struct DecodingInstance {
 
     pub(crate) dpb_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>, // Decoded Pictures Buffer used as reference to decode P-frames and B-frames.
     pub(crate) dst_pool: Vec<(vk::Image, vk::DeviceMemory, vk::ImageView)>, // Stores the current decoded images.
+    pub(crate) reference_slots: Vec<vk::VideoReferenceSlotInfoKHR<'decoding>>,
+    pub(crate) ref_std_infos: Vec<vk::native::StdVideoDecodeH264ReferenceInfo>,
+    pub(crate) ref_resources: Vec<vk::VideoPictureResourceInfoKHR<'decoding>>,
     pub(crate) dpb_pool_size: usize,
     pub(crate) viewport: vk::Viewport,
     pub(crate) scissor: vk::Rect2D,
@@ -60,7 +63,7 @@ pub struct DecodingInstance {
                                            // because some codecs may need a truncated decode extent due to its intrisics
                                            // macroblocks decoding logic.
 }
-impl DecodingInstance {
+impl DecodingInstance<'_> {
     pub fn new(
         _video_queue_family_index: u32,
         _graphics_queue_family_index: u32,
@@ -181,6 +184,9 @@ impl DecodingInstance {
             dpb_pool: dpb_pool,
             dst_pool: dst_pool,
             dpb_pool_size: dpb_pool_size,
+            reference_slots: Vec::with_capacity(dpb_pool_size),
+            ref_resources: Vec::with_capacity(dpb_pool_size),
+            ref_std_infos: Vec::with_capacity(dpb_pool_size),
 
             graphics_complete_semaphores: graphics_complete_semaphores.to_vec(),
             decode_complete_semaphores: decode_complete_semaphores.to_vec(),

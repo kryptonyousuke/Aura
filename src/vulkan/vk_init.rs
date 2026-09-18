@@ -70,7 +70,7 @@ pub struct Aura {
     pub video_extent: vk::Extent2D,
     pub frames_in_flight: u8,
     pub supported_decoders: SupportedCodecs,
-    pub photon: super::photon::lib::DecodingInstance,
+    pub photon: super::photon::lib::DecodingInstance<'static>,
 }
 
 impl Aura {

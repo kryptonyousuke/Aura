@@ -89,6 +89,12 @@ pub struct SpsInfo {
     pub pic_order_cnt_type: u8,
     pub log2_max_pic_order_cnt_lsb_minus4: u8,
 }
+pub struct PpsInfo {
+    /// Indicates how many references to the past this frame needs. (Used by both P and B frames.)
+    pub num_ref_idx_l0_default_active_minus1: u8,
+    /// Indicates how many references to the future this frame needs. (Used only by B frames.)
+    pub num_ref_idx_l1_default_active_minus1: u8,
+}
 
 #[derive(Debug)]
 pub struct SliceHeader {
@@ -97,6 +103,7 @@ pub struct SliceHeader {
     pub pic_parameter_set_id: u32,
     pub frame_num: u16,
     pub pic_order_cnt_lsb: u32,
+    pub num_ref_idx_l0_active: usize,
 }
 
 struct BitReader<'a> {
@@ -171,6 +178,7 @@ pub fn parse_slice_header(
     slice_data: &[u8],
     nal_unit_type: u8,
     sps: &SpsInfo,
+    pps: &PpsInfo,
 ) -> Option<SliceHeader> {
     let mut br = BitReader::new(slice_data);
 
@@ -199,11 +207,24 @@ pub fn parse_slice_header(
         pic_order_cnt_lsb = br.read_u(poc_len)?;
     }
 
+    let mut num_ref_idx_l0_active = (pps.num_ref_idx_l0_default_active_minus1 + 1) as usize;
+
+    if slice_type == 0 || slice_type == 1 {
+        let num_ref_idx_active_override_flag = br.read_u(1)?;
+        if num_ref_idx_active_override_flag == 1 {
+            num_ref_idx_l0_active = (br.read_ue()? + 1) as usize;
+            if slice_type == 1 {
+                let _num_ref_idx_l1_active = br.read_ue()? + 1;
+            }
+        }
+    }
+
     Some(SliceHeader {
         first_mb_in_slice,
         slice_type,
         pic_parameter_set_id,
         frame_num,
         pic_order_cnt_lsb,
+        num_ref_idx_l0_active,
     })
 }

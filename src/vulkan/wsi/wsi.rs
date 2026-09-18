@@ -129,7 +129,7 @@ impl ApplicationHandler for App {
                                             &v_ctx.extradata,
                                         )
                                         .expect("Failed to parse SPS");
-                                    let _std_pps =
+                                    let std_pps =
                                         crate::vulkan::photon::decoders::h264_parser::parse_pps(
                                             &v_ctx.extradata,
                                         )
@@ -142,6 +142,7 @@ impl ApplicationHandler for App {
                                             &slice_offsets,
                                             v_ctx.is_first_frame,
                                             &std_sps,
+                                            &std_pps,
                                         )
                                         .unwrap();
                                     aura.photon.present_swapchain();

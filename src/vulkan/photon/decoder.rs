@@ -139,7 +139,7 @@ pub trait Decoder {
     );
 }
 
-impl Decoder for DecodingInstance {
+impl Decoder for DecodingInstance<'_> {
     fn create_video_session(
         instance: &Instance,
         device: &Device,
