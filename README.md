@@ -46,6 +46,6 @@ Developing Vulkan applications often relies heavily on hardware-specific code, b
 <br/>
 <div align="center">
     <a href="https://github.com/sponsors/kryptonyousuke">
-        <img src="./assets/sponsor_aura.svg" alt="Sponsor Aura" width="220" />
+        <img src="https://raw.githubusercontent.com/kryptonyousuke/kryptonyousuke/fc854bb8ea379c5afae709335869132f9e412cf1/sponsor.svg" alt="Sponsor Aura" width="220" />
     </a>
 </div>
