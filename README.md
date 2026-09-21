@@ -3,7 +3,7 @@
     <p><strong>Aura</strong></p>
     <img src="https://img.shields.io/badge/language-Rust-orange.svg?logo=rust&label=Language&style=for-the-badge&logoColor=orange" alt="Rust">
     <img src="https://img.shields.io/badge/API-Vulkan-brightgreen.svg?logo=vulkan&style=for-the-badge&color=red" alt="Vulkan">
-    <img src="https://img.shields.io/github/stars/kryptonyousuke/AniHub?style=for-the-badge&logo=starship&labelColor=941fd3&color=white">
+    <img src="https://img.shields.io/github/stars/kryptonyousuke/Aura?style=for-the-badge&logo=starship&labelColor=941fd3&color=white">
     <img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg?style=for-the-badge&logo=mdbook&logoColor=ffffff&labelColor=1fd37f&color=grey" alt="License">
 </h1>
 <img src="./assets/animated_test.svg">
@@ -46,6 +46,6 @@ Developing Vulkan applications often relies heavily on hardware-specific code, b
 <br/>
 <div align="center">
     <a href="https://github.com/sponsors/kryptonyousuke">
-        <img src="https://raw.githubusercontent.com/kryptonyousuke/kryptonyousuke/fc854bb8ea379c5afae709335869132f9e412cf1/sponsor.svg" alt="Sponsor Aura" width="220" />
+        <img src="https://raw.githubusercontent.com/kryptonyousuke/kryptonyousuke/61fc1068d44d816eb0fccea61a2ca09ac48b032a/sponsor.svg" alt="Sponsor Aura" width="220" />
     </a>
 </div>
