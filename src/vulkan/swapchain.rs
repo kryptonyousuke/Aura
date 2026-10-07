@@ -112,6 +112,11 @@ impl Aura {
                 unsafe { device.create_image_view(&create_view_info, None).unwrap() }
             })
             .collect::<Vec<_>>();
+        log::debug!(
+            "SWAPCHAIN FORMAT: {:?} COLORSPACE: {:?}",
+            format.format,
+            format.color_space
+        );
 
         (
             swapchain_loader,
