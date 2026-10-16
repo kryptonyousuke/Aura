@@ -438,18 +438,16 @@ impl H264Decoder for DecodingInstance<'_> {
                     self.poc_state.prev_poc_lsb = 0;
                 }
                 log::debug!(
-                    "slice_type: {}",
+                    "slice_type: {} ({})",
                     match slice_header.slice_type {
-                        0 => "P",
-                        5 => "B5",
-                        1 => "B1",
-                        6 => "B6",
-                        2 => "I2",
-                        7 => "I7",
-                        8 | 3 => "SP",
-                        4 => "SI",
-                        _ => "UNKNOW",
-                    }
+                        0 | 5 => "P",
+                        1 | 6 => "B",
+                        2 | 7 => "I",
+                        3 | 8 => "SP",
+                        4 | 9 => "SI",
+                        _ => "UNKNOWN",
+                    },
+                    slice_header.slice_type
                 );
                 real_frame_num = slice_header.frame_num;
                 self.dpb_frame_nums[current_slot_idx] = real_frame_num;

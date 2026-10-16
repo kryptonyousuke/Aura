@@ -213,7 +213,7 @@ pub fn parse_slice_header(
         let num_ref_idx_active_override_flag = br.read_u(1)?;
         if num_ref_idx_active_override_flag == 1 {
             num_ref_idx_l0_active = (br.read_ue()? + 1) as usize;
-            if slice_type == 1 {
+            if slice_type % 5 == 1 {
                 let _num_ref_idx_l1_active = br.read_ue()? + 1;
             }
         }
